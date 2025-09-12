@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 350px;
+      padding: 20px;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      margin: 0;
+    }
+    
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    
+    .header h1 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: bold;
+    }
+    
+    .form-group {
+      margin-bottom: 15px;
+    }
+    
+    .form-group label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 600;
+    }
+    
+    .form-group select,
+    .form-group input {
+      width: 100%;
+      padding: 8px;
+      border: none;
+      border-radius: 5px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+    
+    .checkbox-group input[type="checkbox"] {
+      width: auto;
+      margin-right: 8px;
+    }
+    
+    .btn {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 5px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-bottom: 10px;
+      transition: all 0.3s ease;
+    }
+    
+    .btn-start {
+      background: #28a745;
+      color: white;
+    }
+    
+    .btn-start:hover {
+      background: #218838;
+    }
+    
+    .btn-stop {
+      background: #dc3545;
+      color: white;
+    }
+    
+    .btn-stop:hover {
+      background: #c82333;
+    }
+    
+    .btn:disabled {
+      background: #6c757d;
+      cursor: not-allowed;
+    }
+    
+    .status {
+      text-align: center;
+      padding: 10px;
+      border-radius: 5px;
+      margin-top: 10px;
+      font-weight: bold;
+    }
+    
+    .status.ready {
+      background: rgba(40, 167, 69, 0.2);
+      border: 1px solid #28a745;
+    }
+    
+    .status.running {
+      background: rgba(255, 193, 7, 0.2);
+      border: 1px solid #ffc107;
+    }
+    
+    .status.error {
+      background: rgba(220, 53, 69, 0.2);
+      border: 1px solid #dc3545;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🚀 RocketBooker</h1>
+  </div>
+  
+  <div class="form-group">
+    <label for="branch">สาขา:</label>
+    <select id="branch">
+      <option value="">กำลังโหลด...</option>
+    </select>
+  </div>
+  
+  <div class="form-group">
+    <label for="mode">โหมด:</label>
+    <select id="mode">
+      <option value="trial">ทดลอง (Trial)</option>
+      <option value="production">ใช้งานจริง (Production)</option>
+    </select>
+  </div>
+  
+  <div class="form-group">
+    <label for="site">เว็บไซต์:</label>
+    <select id="site">
+      <option value="rocketbooking">PopMart Thailand (Exclusive)</option>
+      <option value="botautoq">BotAutoQ (Trial)</option>
+      <option value="ithitec">PopMart iTHiTEC (Trial)</option>
+    </select>
+  </div>
+  
+  <div class="form-group">
+    <label for="day">วันที่:</label>
+    <select id="day">
+      <option value="1">1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="4">4</option>
+      <option value="5">5</option>
+      <option value="6">6</option>
+      <option value="7">7</option>
+      <option value="8">8</option>
+      <option value="9">9</option>
+      <option value="10">10</option>
+      <option value="11">11</option>
+      <option value="12">12</option>
+      <option value="13">13</option>
+      <option value="14">14</option>
+      <option value="15">15</option>
+      <option value="16">16</option>
+      <option value="17">17</option>
+      <option value="18">18</option>
+      <option value="19">19</option>
+      <option value="20">20</option>
+    </select>
+  </div>
+  
+  <div class="form-group">
+    <label for="round">รอบ:</label>
+    <select id="round">
+      <option value="1">1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="4">4</option>
+      <option value="5">5</option>
+      <option value="6">6</option>
+      <option value="7">7</option>
+      <option value="8">8</option>
+      <option value="9">9</option>
+      <option value="10">10</option>
+      <option value="11">11</option>
+      <option value="12">12</option>
+      <option value="13">13</option>
+      <option value="14">14</option>
+      <option value="15">15</option>
+      <option value="16">16</option>
+      <option value="17">17</option>
+      <option value="18">18</option>
+      <option value="19">19</option>
+      <option value="20">20</option>
+    </select>
+  </div>
+  
+  <div id="productionOptions" style="display: none;">
+    <div class="checkbox-group">
+      <input type="checkbox" id="useDelay">
+      <label for="useDelay">เพิ่ม Delay</label>
+    </div>
+    
+    <div class="checkbox-group">
+      <input type="checkbox" id="manualRegister">
+      <label for="manualRegister">กด Register ด้วยตัวเอง</label>
+    </div>
+    
+    <div class="checkbox-group">
+      <input type="checkbox" id="useLineLogin">
+      <label for="useLineLogin">LINE Login อัตโนมัติ</label>
+    </div>
+    
+    <button id="lineLoginBtn" class="btn" style="background: #00C300; display: none;">🔗 เชื่อมต่อ LINE</button>
+  </div>
+  
+  <div class="checkbox-group">
+    <input type="checkbox" id="useProfile">
+    <label for="useProfile">ใช้ข้อมูลโปรไฟล์</label>
+  </div>
+  
+  <div id="profileSection" style="display: none;">
+    <div class="form-group">
+      <label for="firstName">ชื่อ:</label>
+      <input type="text" id="firstName" placeholder="ชื่อจริง">
+    </div>
+    
+    <div class="form-group">
+      <label for="lastName">นามสกุล:</label>
+      <input type="text" id="lastName" placeholder="นามสกุล">
+    </div>
+    
+    <div class="form-group">
+      <label for="phone">เบอร์โทร:</label>
+      <input type="text" id="phone" placeholder="08xxxxxxxx">
+    </div>
+    
+    <div class="form-group">
+      <label for="idCard">เลขบัตรประชาชน:</label>
+      <input type="text" id="idCard" placeholder="13 หลัก">
+    </div>
+  </div>
+  
+  <button id="startBtn" class="btn btn-start">เริ่มจอง</button>
+  <button id="stopBtn" class="btn btn-stop" disabled>หยุด</button>
+  <button id="clearDataBtn" class="btn" style="background: #6c757d; font-size: 12px;">🗑️ ลบข้อมูล</button>
+  
+  <div id="status" class="status ready">พร้อมใช้งาน</div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
