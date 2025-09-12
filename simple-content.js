@@ -151,40 +151,126 @@ const useDelayCk = document.getElementById('rb-use-delay');
 const manualCk   = document.getElementById('rb-manual-register');
 useDelayCk?.addEventListener('change', setOverlayStatusBadge);
 manualCk?.addEventListener('change', setOverlayStatusBadge);
-async function refreshBranchesIntoOverlay() {
+// --- helper: map siteKey ให้ตรงกับฝั่ง background/worker
+function mapSiteKeyForWorker(raw) {
+  const k = String(raw || '').toLowerCase();
+  if (k === 'pm' || k === 'botautoq') return 'botautoq';
+  if (k === 'ith' || k === 'ithitec') return 'ithitec';
+  if (k === 'popmartrock' || k === 'rocketbooking' || k === 'production') return 'rocketbooking';
+  return 'rocketbooking';
+}
+
+// --- helper: fallback ฮาร์ดโค้ด
+function hardcodedBranches() {
+  return [
+    "Terminal 21","Centralworld","Siam Center","Seacon Square","MEGABANGNA",
+    "Central Westgate","Central Ladprao","Fashion Island","Emsphere","Central Pattaya",
+    "Central Chiangmai","Icon Siam","Central Dusit","Wacky Mart Event"
+  ];
+}
+
+// --- ดึงตรงจาก Worker (สำหรับ iOS/Orion ที่ background ไม่ตอบ)
+async function directFetchBranches(siteKey) {
   try {
-    // map ค่า site ใน overlay -> key ฝั่ง background
-    const siteSel = document.getElementById('rb-site')?.value || 'pm';
-    const siteMap = { pm: 'botautoq', ith: 'ithitec', popmartrock: 'rocketbooking' };
-    const siteKey = siteMap[siteSel] || siteSel || 'rocketbooking';
-
-    const resp = await chrome.runtime.sendMessage({ action: 'getBranches', site: siteKey });
-    const list = (resp && Array.isArray(resp.branches)) ? resp.branches : [];
-
-    if (!list.length) {
-      addLog('⚠️ background: ไม่มีลิสต์สาขา (คงค่าเดิมถ้ามี)', '#FFB6C1');
-      return;
-    }
-
-    // อัปเดตตัวแปรกลาง + เติมลง select
-    BRANCHES = list.slice();
-    const branchSelect = document.getElementById('rb-branch');
-    if (branchSelect) {
-      const prev = branchSelect.value;
-      branchSelect.innerHTML = '';
-      BRANCHES.forEach(b => {
-        const opt = document.createElement('option');
-        opt.value = b; opt.textContent = b;
-        branchSelect.appendChild(opt);
-      });
-      if (prev && BRANCHES.includes(prev)) branchSelect.value = prev; // คงค่าเดิมถ้าอยู่ในลิสต์ใหม่
-    }
-
-    addLog(`🔄 อัปเดตสาขาจาก background แล้ว (${BRANCHES.length})`);
+    const base = 'https://branch-api.kan-krittapon.workers.dev';
+    const res = await fetch(`${base}/branches`, { credentials: 'omit', cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const bySite = json?.data?.branches || json?.branches || json?.data || json;
+    const key = mapSiteKeyForWorker(siteKey);
+    return Array.isArray(bySite?.[key]) ? bySite[key] : [];
   } catch (e) {
-    addLog('⚠️ โหลดสาขาจาก background ไม่สำเร็จ', '#FFB6C1');
+    addLog(`⚠ directFetchBranches ล้มเหลว: ${e}`, '#FFB6C1');
+    return [];
   }
 }
+
+async function refreshBranchesIntoOverlay() {
+  const branchSelect = document.getElementById('rb-branch');
+  if (!branchSelect) return;
+
+  // UI: กำลังโหลด…
+  branchSelect.innerHTML = '';
+  const loadingOpt = document.createElement('option');
+  loadingOpt.value = '';
+  loadingOpt.textContent = 'กำลังโหลด…';
+  branchSelect.appendChild(loadingOpt);
+
+  try {
+    // map ค่า site ใน overlay -> key ฝั่ง worker/background
+    const siteSel = document.getElementById('rb-site')?.value || 'pm';
+    const siteKey = mapSiteKeyForWorker(siteSel);
+
+    let list = [];
+
+    // 1) ขอจาก background (กัน service worker ไม่ตอบด้วย timeout)
+    try {
+      const bg = await new Promise((resolve) => {
+        let done = false;
+        const tid = setTimeout(() => { if (!done) resolve(null); }, 1200);
+        chrome.runtime.sendMessage({ action: 'getBranches', site: siteKey }, (resp) => {
+          if (done) return; done = true; clearTimeout(tid);
+          resolve(resp);
+        });
+      });
+      if (bg && bg.ok && Array.isArray(bg.branches)) list = bg.branches;
+    } catch {}
+
+    // 2) ถ้า background ไม่ได้ ให้ fetch ตรงจาก Worker (รองรับ iOS/Orion)
+    if (!list.length) {
+      list = await directFetchBranches(siteKey);
+    }
+
+    // 3) ถ้ายังว่าง ลองอ่าน cache เดิมจาก storage
+    if (!list.length) {
+      try {
+        const { branches } = await chrome.storage.local.get('branches');
+        const cached = branches?.[siteKey];
+        if (Array.isArray(cached) && cached.length) list = cached;
+      } catch {}
+    }
+
+    // 4) สุดท้ายจริง ๆ → ฮาร์ดโค้ด
+    if (!list.length) {
+      list = hardcodedBranches();
+      addLog('⚠ ใช้สาขาแบบฮาร์ดโค้ด (fallback)', '#FFB6C1');
+    }
+
+    // เก็บ cache (ใช้รอบหน้า)
+    try {
+      const { branches = {} } = await chrome.storage.local.get('branches');
+      branches[siteKey] = list.slice();
+      await chrome.storage.local.set({ branches, branches_updated_at: Date.now() });
+    } catch {}
+
+    // render ลง select
+    const prev = branchSelect.value;
+    branchSelect.innerHTML = '';
+    list.forEach(b => {
+      const opt = document.createElement('option');
+      opt.value = b; opt.textContent = b;
+      branchSelect.appendChild(opt);
+    });
+    if (prev && list.includes(prev)) branchSelect.value = prev;
+
+    // อัปเดตตัวแปรกลางด้วย (ถ้ามีที่อื่นอ้าง BRANCHES)
+    try { BRANCHES = list.slice(); } catch {}
+
+    addLog(`✅ โหลดสาขาแล้ว (${siteKey}) : ${list.length} รายการ`, '#90EE90');
+  } catch (e) {
+    // error หนักมาก → fallback ฮาร์ดโค้ด
+    const list = hardcodedBranches();
+    branchSelect.innerHTML = '';
+    list.forEach(b => {
+      const opt = document.createElement('option');
+      opt.value = b; opt.textContent = b;
+      branchSelect.appendChild(opt);
+    });
+    try { BRANCHES = list.slice(); } catch {}
+    addLog('⚠ โหลดสาขาไม่สำเร็จทั้งหมด → ใช้ฮาร์ดโค้ด', '#FFB6C1');
+  }
+}
+
 
 /* ===== UI wiring ===== */
 setTimeout(function() {
