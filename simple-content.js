@@ -151,123 +151,38 @@ const useDelayCk = document.getElementById('rb-use-delay');
 const manualCk   = document.getElementById('rb-manual-register');
 useDelayCk?.addEventListener('change', setOverlayStatusBadge);
 manualCk?.addEventListener('change', setOverlayStatusBadge);
-
-// === โหลด branches จาก background แล้วเติมใน overlay ===
-// --- helper: map siteKey ให้ตรงกับฝั่ง background/worker
-function mapSiteKeyForWorker(raw) {
-  const k = String(raw || '').toLowerCase();
-  if (k === 'pm' || k === 'botautoq') return 'botautoq';
-  if (k === 'ith' || k === 'ithitec') return 'ithitec';
-  if (k === 'popmartrock' || k === 'rocketbooking' || k === 'production') return 'rocketbooking';
-  return 'rocketbooking';
-}
-
-// --- helper: fallback ฮาร์ดโค้ด
-function hardcodedBranches() {
-  return [
-    "Terminal 21","Centralworld","Siam Center","Seacon Square","MEGABANGNA",
-    "Central Westgate","Central Ladprao","Fashion Island","Emsphere","Central Pattaya",
-    "Central Chiangmai","Icon Siam","Central Dusit","Wacky Mart Event"
-  ];
-}
-
-// --- (ทางเลือก) ดึงตรงจาก Worker เผื่อ background ไม่ตอบ (มือถือ/Orion)
-async function directFetchBranches(siteKey) {
-  try {
-    const base = 'https://branch-api.kan-krittapon.workers.dev';
-    const res = await fetch(`${base}/branches`, { credentials: 'omit', cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    const bySite = json?.data?.branches || json?.branches || json?.data || json;
-    const key = mapSiteKeyForWorker(siteKey);
-    const out = Array.isArray(bySite?.[key]) ? bySite[key] : [];
-    return out;
-  } catch (e) {
-    addLog(`⚠ directFetchBranches ล้มเหลว: ${e}`, '#FFB6C1');
-    return [];
-  }
-}
-
-// === โหลด branches แล้วเติมใน overlay (มี fallback ครบ) ===
 async function refreshBranchesIntoOverlay() {
-  const branchSelect = document.getElementById('rb-branch');
-  if (!branchSelect) return;
-
-  // แสดง “กำลังโหลด…”
-  branchSelect.innerHTML = '';
-  const loadingOpt = document.createElement('option');
-  loadingOpt.value = ''; loadingOpt.textContent = 'กำลังโหลด…';
-  branchSelect.appendChild(loadingOpt);
-
   try {
-    // map site จาก overlay → key ที่ background/worker เข้าใจ
+    // map ค่า site ใน overlay -> key ฝั่ง background
     const siteSel = document.getElementById('rb-site')?.value || 'pm';
     const siteMap = { pm: 'botautoq', ith: 'ithitec', popmartrock: 'rocketbooking' };
     const siteKey = siteMap[siteSel] || siteSel || 'rocketbooking';
 
-    let list = [];
+    const resp = await chrome.runtime.sendMessage({ action: 'getBranches', site: siteKey });
+    const list = (resp && Array.isArray(resp.branches)) ? resp.branches : [];
 
-    // 1) ขอจาก background (ตั้ง timeout กัน service worker ไม่ตอบ)
-    try {
-      const bg = await new Promise((resolve) => {
-        let done = false;
-        const tid = setTimeout(() => { if (!done) resolve(null); }, 1200);
-        chrome.runtime.sendMessage({ action: 'getBranches', site: siteKey }, (resp) => {
-          if (done) return; done = true; clearTimeout(tid);
-          resolve(resp);
-        });
+    if (!list.length) {
+      addLog('⚠️ background: ไม่มีลิสต์สาขา (คงค่าเดิมถ้ามี)', '#FFB6C1');
+      return;
+    }
+
+    // อัปเดตตัวแปรกลาง + เติมลง select
+    BRANCHES = list.slice();
+    const branchSelect = document.getElementById('rb-branch');
+    if (branchSelect) {
+      const prev = branchSelect.value;
+      branchSelect.innerHTML = '';
+      BRANCHES.forEach(b => {
+        const opt = document.createElement('option');
+        opt.value = b; opt.textContent = b;
+        branchSelect.appendChild(opt);
       });
-      if (bg && bg.ok && Array.isArray(bg.branches)) list = bg.branches;
-    } catch {}
-
-    // 2) ถ้า background ไม่ได้ ให้ fetch ตรงจาก Worker
-    if (!list.length) list = await directFetchBranches(siteKey);
-
-    // 3) ถ้ายังว่าง ลอง cache จาก storage
-    if (!list.length) {
-      try {
-        const { branches } = await chrome.storage.local.get('branches');
-        const cached = branches?.[siteKey];
-        if (Array.isArray(cached) && cached.length) list = cached;
-      } catch {}
+      if (prev && BRANCHES.includes(prev)) branchSelect.value = prev; // คงค่าเดิมถ้าอยู่ในลิสต์ใหม่
     }
 
-    // 4) สุดท้าย → ฮาร์ดโค้ด
-    if (!list.length) {
-      list = hardcodedBranches();
-      addLog('⚠ ใช้สาขาแบบฮาร์ดโค้ด (fallback)', '#FFB6C1');
-    }
-
-    // เก็บ cache (งวดหน้าโหลดเร็ว)
-    try {
-      const { branches = {} } = await chrome.storage.local.get('branches');
-      branches[siteKey] = list.slice();
-      await chrome.storage.local.set({ branches, branches_updated_at: Date.now() });
-    } catch {}
-
-    // render
-    branchSelect.innerHTML = '';
-    list.forEach(b => {
-      const opt = document.createElement('option');
-      opt.value = b; opt.textContent = b;
-      branchSelect.appendChild(opt);
-    });
-
-    // อัปเดตตัวแปรกลาง (ถ้ามีการอ้าง BRANCHES อื่น ๆ)
-    try { BRANCHES = list.slice(); } catch {}
-
-    addLog(`✅ โหลดสาขาแล้ว (${siteKey}) : ${list.length} รายการ`, '#90EE90');
+    addLog(`🔄 อัปเดตสาขาจาก background แล้ว (${BRANCHES.length})`);
   } catch (e) {
-    // error หนักมาก → ยัง fallback ได้อยู่
-    const list = hardcodedBranches();
-    branchSelect.innerHTML = '';
-    list.forEach(b => {
-      const opt = document.createElement('option');
-      opt.value = b; opt.textContent = b;
-      branchSelect.appendChild(opt);
-    });
-    try { BRANCHES = list.slice(); } catch {}
-    addLog('⚠ โหลดสาขาไม่สำเร็จทั้งหมด → ใช้ฮาร์ดโค้ด', '#FFB6C1');
+    addLog('⚠️ โหลดสาขาจาก background ไม่สำเร็จ', '#FFB6C1');
   }
 }
 
@@ -279,16 +194,16 @@ setTimeout(function() {
   const modeSelect = document.getElementById('rb-mode');
   const siteSelect = document.getElementById('rb-site');
 
-  rocket?.addEventListener('click', function() {
-    if (panel.style.display === 'none' || !panel.style.display) {
-      panel.style.display = 'block';
-      checkStatus();
-      setOverlayStatusBadge();
-      refreshBranchesIntoOverlay();
-    } else {
-      panel.style.display = 'none';
-    }
-  });
+rocket?.addEventListener('click', function() {
+  if (panel.style.display === 'none' || !panel.style.display) {
+    panel.style.display = 'block';
+    checkStatus();
+    setOverlayStatusBadge();      // รีเฟรชข้อความ Mode/Manual/Delay
+    refreshBranchesIntoOverlay(); // โหลดสาขาล่าสุดจาก background
+  } else {
+    panel.style.display = 'none';
+  }
+});
   closeBtn?.addEventListener('click', function(){ panel.style.display = 'none'; });
 
   modeSelect?.addEventListener('change', function() {
@@ -309,44 +224,33 @@ setTimeout(function() {
       siteSelect.innerHTML = `<option value="popmartrock">PopMart Thailand</option>`;
     }
     checkStatus();
-    setOverlayStatusBadge();
-    refreshBranchesIntoOverlay();
+	setOverlayStatusBadge();
+	refreshBranchesIntoOverlay();
   });
 
   siteSelect?.addEventListener('change', () => {
-    checkStatus();
-    setOverlayStatusBadge();
-    refreshBranchesIntoOverlay();
-  });
+  checkStatus();
+  setOverlayStatusBadge();
+  refreshBranchesIntoOverlay();
+});
 
-  // populate selects (day/time)
+  // populate selects
   refreshBranchesIntoOverlay();
   const daySelect = document.getElementById('rb-day');
   if (daySelect) {
     daySelect.innerHTML = '';
-    for (let d=1; d<=31; d++){
-      const o=document.createElement('option');
-      o.value=o.textContent=String(d);
-      daySelect.appendChild(o);
-    }
+    for (let d=1; d<=31; d++){ const o=document.createElement('option'); o.value=o.textContent=String(d); daySelect.appendChild(o); }
   }
   const timeSelect = document.getElementById('rb-time');
   if (timeSelect) {
     timeSelect.innerHTML = '';
-    ['10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
-     '15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00',
-     '19:30','20:00','20:30','21:00','21:30','22:00','22:30','23:00']
-      .forEach(t => {
-        const o=document.createElement('option');
-        o.value=t; o.textContent=t;
-        timeSelect.appendChild(o);
-      });
+    ['10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00','19:30','20:00','20:30','21:00','21:30','22:00','22:30','23:00']
+      .forEach(t => { const o=document.createElement('option'); o.value=t; o.textContent=t; timeSelect.appendChild(o); });
   }
 
   document.getElementById('rb-start')?.addEventListener('click', startBooking);
 
 }, 100);
-
 
 /* ===== Status + Logging ===== */
 function checkStatus() {
@@ -472,52 +376,66 @@ function makeGoldenTicket() {
   return btoa(JSON.stringify(fakeData)).substring(0, 256);
 }
 
-// ===== Minigame (ithitec + popmartrock) =====
+/* ===== Minigame (ithitec) ===== */
 async function handleMinigame() {
-  // ทำงานเฉพาะ 2 โฮสต์นี้เท่านั้น
-  if (!/ithitec|rocket-booking/.test(location.hostname)) return false;
+  const site = (typeof detectSite === 'function') ? detectSite() : (location.hostname.includes('ithitec') ? 'ith' : null);
 
-  addLog('🎮 ตรวจสอบมินิเกม...', '#87CEEB');
+  if (site === 'ith') {
+    addLog('🎮 ตรวจสอบมินิเกม (ithitec: 3D rotation)...', '#87CEEB');
 
-  // 1) 3D Rotation Captcha (ถ้ามี)
-  const viewport = document.getElementById('captcha-viewport');
-  if (viewport) {
-    addLog('🔍 พบ 3D Rotation Captcha', '#87CEEB');
-    const solved = await solve3DRotation();
-    if (solved) {
-      addLog('✅ 3D Rotation แก้แล้ว!', '#90EE90');
-      return true;
+    const viewport = document.getElementById('captcha-viewport');
+    if (viewport) {
+      addLog('🔍 พบ 3D Rotation Captcha', '#87CEEB');
+      const solved = await solve3DRotation();
+      if (solved) { addLog('✅ 3D Rotation แก้แล้ว!', '#90EE90'); return true; }
     }
+
+    // บางครั้ง ithitec อาจแสดง React minigame ด้วย
+    const reactContainer = document.querySelector('.sc-623bb80d-0');
+    if (reactContainer) {
+      addLog('🔍 พบ React Minigame (ithitec)', '#87CEEB');
+      const ok = await pushGoldenTicketToReact('.sc-623bb80d-0');
+      if (ok) { addLog('✅ Golden Ticket ส่งสำเร็จ!', '#90EE90'); return true; }
+      const bypassed = await tryBypassReactMinigame();
+      if (bypassed) { addLog('✅ Minigame bypass สำเร็จ!', '#90EE90'); return true; }
+    }
+
+    addLog('✅ ไม่พบมินิเกม (ithitec)', '#90EE90');
+    return false;
   }
 
-  // 2) React Minigame + Golden Ticket (ถ้ามี)
-  // NOTE: ถ้า prod ใช้คลาสต่างจาก '.sc-623bb80d-0'
-  // ให้เพิ่ม selector อื่น ๆ ต่อท้ายได้ตามต้องการ
-  const reactContainer =
-    document.querySelector('.sc-623bb80d-0') ||
-    document.querySelector('[data-minigame-root]') ||
-    null;
+  if (site === 'popmartrock') {
+    addLog('🎮 ตรวจสอบมินิเกม (popmartrock: React)...', '#87CEEB');
+    const selectors = [
+      '.sc-623bb80d-0',
+      '[data-minigame-root]',
+      '.react-captcha-root'
+    ];
+    let hostSel = null;
+    for (const s of selectors) {
+      const el = document.querySelector(s);
+      if (el) { hostSel = s; break; }
+    }
 
-  if (reactContainer) {
+    if (!hostSel) {
+      addLog('✅ ไม่พบมินิเกม (popmartrock)', '#90EE90');
+      return false;
+    }
+
     addLog('🔍 พบ React Minigame', '#87CEEB');
-    const ok = await pushGoldenTicketToReact('.sc-623bb80d-0');
-    if (ok) {
-      addLog('✅ Golden Ticket ส่งสำเร็จ!', '#90EE90');
-      return true;
-    }
+    const ok = await pushGoldenTicketToReact(hostSel);
+    if (ok) { addLog('✅ Golden Ticket ส่งสำเร็จ!', '#90EE90'); return true; }
+
+    const bypassed = await tryBypassReactMinigame();
+    if (bypassed) { addLog('✅ Minigame bypass สำเร็จ!', '#90EE90'); return true; }
+
+    addLog('⚠️ ส่ง Golden Ticket/BYPASS ไม่สำเร็จ', '#FFB6C1');
+    return false;
   }
 
-  // 3) Fallback bypass (เผื่อเปลี่ยน implementation)
-  const bypassed = await tryBypassReactMinigame();
-  if (bypassed) {
-    addLog('✅ Minigame bypass สำเร็จ!', '#90EE90');
-    return true;
-  }
-
-  addLog('✅ ไม่พบมินิเกม', '#90EE90');
+  addLog('🎮 ไม่มีมินิเกมสำหรับไซต์นี้', '#87CEEB');
   return false;
 }
-
 async function solve3DRotation() {
   try {
     const viewport = document.getElementById('captcha-viewport');
@@ -586,7 +504,6 @@ async function tryBypassReactMinigame(){
   } catch {}
   return false;
 }
-
 async function waitRegisterReady({
   xpath = "//button[normalize-space()='Register'] | //div//*[normalize-space()='Register'] | //button[normalize-space()='ลงทะเบียน']",
   timeoutMs = 600000 // 10 นาที ปรับได้
@@ -701,7 +618,7 @@ async function ensureBranchPage(maxRetries = 5){
     if (ok) return;
     addLog('🔁 ยังไม่พบหน้าสาขา - ปิดหน้าต่างแล้วลอง Register ใหม่', '#FFB6C1');
     await closeAnyModalIfPresent();
-    await new Promise(r => setTimeout(r, 150)); // เหมือน oldsource 150ms
+    await SHORT_DELAY();
     await clickRegister();
   }
   // last wait
@@ -748,11 +665,10 @@ async function selectBranch(name){
   const currentSite = detectSite();
   const mode = document.getElementById('rb-mode')?.value || 'trial';
   let branchWait = 1000;
-  if (mode === 'production') branchWait = 1000; // เร็วขึ้น
+  if (mode === 'production') branchWait = 2000;
   else if (currentSite === 'pm') branchWait = 600;
   await new Promise(r => setTimeout(r, branchWait));
 
-  // ลองหาตรง ๆ ก่อน
   let el = quickFindBranch(name);
   if (!el) {
     addLog(`⚠️ ไม่เจอสาขา ${name} รอสักครู่...`, '#FFB6C1');
@@ -764,10 +680,8 @@ async function selectBranch(name){
       const rejectOnce  = (e) => { if (done) return; done = true; reject(e); };
 
       const poll = setInterval(async () => {
-        // เคสหยุดกลางทาง
         if (window.isStopped) { clearInterval(poll); return rejectOnce(new Error('STOPPED')); }
 
-        // re-query ชื่อสาขาเป้าหมาย
         el = quickFindBranch(name);
         if (el) {
           clearInterval(poll);
@@ -775,36 +689,26 @@ async function selectBranch(name){
           return resolveOnce();
         }
 
-        // หมดเวลา 10s → ลองกลยุทธ์พิเศษ + fallback
         if (performance.now() - t0 > 10000) {
           clearInterval(poll);
 
-          // กลยุทธ์พิเศษเฉพาะ production: ปิด modal + คลิกพื้นที่ว่าง + re-check
           if (mode === 'production') {
             addLog('🔄 ปิด popup/Modal และคลิกพื้นที่ว่าง...', '#FFB6C1');
             try {
-              // ปิด modal ที่ติดอยู่ (ใช้ util เดิมถ้ามี)
               try { await closeAnyModalIfPresent(); } catch {}
-              // เพิ่ม safety ปิดไอคอน close ที่เจอ
               try {
                 document.querySelectorAll('span[role="img"][aria-label="close"], button[aria-label="close"]').forEach(x => x.click());
               } catch {}
-
-              // คลิกกลางหน้าจอ 1 ครั้ง
               setTimeout(() => {
                 const centerX = window.innerWidth / 2;
                 const centerY = window.innerHeight / 2;
                 try { document.elementFromPoint(centerX, centerY)?.click(); } catch {}
-
-                // รอสั้น ๆ แล้ว re-check สาขาเป้าหมาย
                 setTimeout(() => {
                   el = quickFindBranch(name);
                   if (el) {
                     addLog(`✅ เจอสาขา ${name} หลังคลิกพื้นที่ว่าง!`, '#90EE90');
                     return resolveOnce();
                   }
-
-                  // ไม่เจอ → ลองสาขาทดแทนจากลิสต์
                   for (const branch of BRANCHES) {
                     el = quickFindBranch(branch);
                     if (el) {
@@ -820,7 +724,6 @@ async function selectBranch(name){
               return rejectOnce(e);
             }
           } else {
-            // โหมดอื่น: ลองสาขาทดแทนทันที
             for (const branch of BRANCHES) {
               el = quickFindBranch(branch);
               if (el) {
@@ -842,202 +745,50 @@ async function selectBranch(name){
   addLog(`✅ คลิกสาขาแล้ว!`, '#90EE90');
   await new Promise(r => setTimeout(r, 500));
 }
-
-// ---------- helpers ----------
-const TIME_LIST = ['10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00','19:30','20:00','20:30','21:00','21:30','22:00','22:30','23:00'];
-
-function isDisplayedEnabled(el) {
-  if (!el) return false;
-  if (el.offsetParent === null) return false;
-  if (el.disabled || el.hasAttribute('disabled')) return false;
-  const css = getComputedStyle(el);
-  if (css.pointerEvents === 'none' || css.visibility === 'hidden' || css.display === 'none') return false;
-  const aria = el.getAttribute('aria-disabled');
-  if (aria === 'true') return false;
-  // กันกรณีปุ่ม “เทา” จากคลาส/สไตล์
-  const bg = css.backgroundColor || '';
-  const m = bg.match(/\d+/g);
-  if (m) {
-    const [r,g,b] = m.map(Number);
-    const grayish = Math.abs(r-g) < 10 && Math.abs(g-b) < 10 && r < 200;
-    if (grayish) return false;
-  }
-  return true;
-}
-
-function findEnabledBtnByTextExact(txt) {
-  const norm = s => String(s||'').replace(/\s+/g,' ').trim();
-  const cand = Array.from(document.querySelectorAll('button,[role="button"]'));
-  for (const b of cand) {
-    if (norm(b.textContent) === String(txt) && isDisplayedEnabled(b)) return b;
-  }
-  return null;
-}
-
-function listEnabledBtns() {
-  return Array.from(document.querySelectorAll('button,[role="button"]')).filter(isDisplayedEnabled);
-}
-
-// ---------- วันที่: รองรับ fallback ----------
-async function selectDate(day, opts = {}) {
-  // opts.allowFallback=true, opts.searchWindow=[0..+2] เป็นต้น
-  const mode = document.getElementById('rb-mode')?.value || 'trial';
-  const allowFallback = opts.allowFallback !== false; // default true
-  const searchWindow = Array.isArray(opts.searchWindow) ? opts.searchWindow : [0,1,2]; // 0=วันนี้(ปุ่มที่เห็นอยู่), +1,+2 วันถัดไป (บน UI เดียวกัน)
-
+async function selectDate(day){
   addLog(`📅 เลือกวันที่: ${day}`);
-
-  let targetBtn = null;
-
-  // โหมด production: ใช้ query แบบ “ปุ่มไม่เต็ม ไม่ disabled”
-  if (mode === 'production') {
-    // 1) exact match ก่อน
-    targetBtn = findEnabledBtnByTextExact(day);
-    if (targetBtn) {
-      await clickFast(targetBtn);
-      addLog(`🎯 เลือกวันที่: ${day} แล้ว`, '#90EE90');
-      await SHORT_DELAY();
-      window.RB_LAST_SELECTION = { ...(window.RB_LAST_SELECTION||{}), day };
-      return;
-    }
-
-    // 2) fallback (ถ้าอนุญาต)
-    if (allowFallback) {
-      addLog(`⚠️ วันที่ ${day} ใช้ไม่ได้/ไม่พบ กำลังมองหาวันที่ใกล้เคียง...`, '#FFB6C1');
-      // กลยุทธ์: หา “เลขวัน” ใกล้เคียงที่สุดที่มีปุ่ม enabled ในหน้าปัจจุบัน
-      const enabled = listEnabledBtns()
-        .map(el => ({ el, txt: String((el.textContent||'').trim()) }))
-        .filter(x => /^\d{1,2}$/.test(x.txt)); // ปุ่มที่เป็นตัวเลขวัน
-
-      // เรียงโดยระยะห่าง
-      const dayNum = Number(day);
-      enabled.sort((a,b) => Math.abs(Number(a.txt)-dayNum) - Math.abs(Number(b.txt)-dayNum));
-
-      if (enabled.length) {
-        targetBtn = enabled[0].el;
-        const picked = enabled[0].txt;
-        await clickFast(targetBtn);
-        addLog(`🔄 ใช้วันทดแทน: ${picked}`, '#FFB6C1');
-        await SHORT_DELAY();
-        window.RB_LAST_SELECTION = { ...(window.RB_LAST_SELECTION||{}), day: picked };
-        return;
-      }
-    }
-  } else {
-    // โหมด trial: ใช้ XPath แบบเดิมก่อน
-    const xp = `//button[normalize-space()='${day}']`;
-    const el = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-    if (isDisplayedEnabled(el)) {
-      el.click();
-      addLog(`🎯 เลือกวันที่: ${day} แล้ว`, '#90EE90');
-      await SHORT_DELAY();
-      window.RB_LAST_SELECTION = { ...(window.RB_LAST_SELECTION||{}), day };
-      return;
-    }
-    if (allowFallback) {
-      addLog(`⚠️ วันที่ ${day} ใช้ไม่ได้/ไม่พบ กำลังมองหาวันที่ใกล้เคียง...`, '#FFB6C1');
-      const enabled = listEnabledBtns()
-        .map(el => ({ el, txt: String((el.textContent||'').trim()) }))
-        .filter(x => /^\d{1,2}$/.test(x.txt));
-      const dayNum = Number(day);
-      enabled.sort((a,b) => Math.abs(Number(a.txt)-dayNum) - Math.abs(Number(b.txt)-dayNum));
-      if (enabled.length) {
-        targetBtn = enabled[0].el;
-        const picked = enabled[0].txt;
-        await clickFast(targetBtn);
-        addLog(`🔄 ใช้วันทดแทน: ${picked}`, '#FFB6C1');
-        await SHORT_DELAY();
-        window.RB_LAST_SELECTION = { ...(window.RB_LAST_SELECTION||{}), day: picked };
-        return;
-      }
-    }
-  }
-
-  throw new Error(`ไม่พบ/เลือกไม่ได้สำหรับวันที่: ${day}`);
-}
-
-// ---------- เวลา/รอบ: รองรับ fallback ----------
-async function selectTimeOrRound(timeOrRound, opts = {}) {
-  // opts.allowFallback=true, opts.strategy='nearest'|'first'
   const mode = document.getElementById('rb-mode')?.value || 'trial';
-  const allowFallback = opts.allowFallback !== false;
-  const strategy = opts.strategy || 'nearest';
 
-  addLog(`⏰ เลือกเวลา: ${timeOrRound}`);
+  let el = null;
+  let attempts = 0;
+  const maxAttempts = 2000;
 
-  // 1) exact match ก่อน
-  let el = findEnabledBtnByTextExact(timeOrRound);
-  if (el) {
-    await clickFast(el);
-    addLog(`🎯 เลือกเวลา: ${timeOrRound} แล้ว`, '#90EE90');
-    await SHORT_DELAY();
-    window.RB_LAST_SELECTION = { ...(window.RB_LAST_SELECTION||{}), time: timeOrRound };
-    return;
-  }
-
-  // 2) ถ้า user ส่งเป็น round (index 1-based) → map ไป TIME_LIST
-  if (!el && /^\d+$/.test(String(timeOrRound))) {
-    const idx = Number(timeOrRound);
-    if (idx >= 1 && idx <= TIME_LIST.length) {
-      const t = TIME_LIST[idx - 1];
-      el = findEnabledBtnByTextExact(t);
-      if (el) {
-        await clickFast(el);
-        addLog(`🎯 เลือกเวลา (รอบ ${idx}): ${t}`, '#90EE90');
-        await SHORT_DELAY();
-        window.RB_LAST_SELECTION = { ...(window.RB_LAST_SELECTION||{}), time: t };
-        return;
-      }
-    }
-  }
-
-  // 3) fallback หาเวลาใกล้เคียง/อันแรกที่ว่าง
-  if (allowFallback) {
-    addLog(`⚠️ เวลา ${timeOrRound} ใช้ไม่ได้/ไม่พบ กำลังมองหาเวลาทดแทน...`, '#FFB6C1');
-
-    // รวบรวมเวลาที่ “เห็นและคลิกได้”
-    const enabled = listEnabledBtns()
-      .map(el => ({ el, txt: String((el.textContent||'').trim()) }))
-      .filter(x => /^\d{1,2}:\d{2}$/.test(x.txt)); // รูปแบบ HH:MM
-
-    if (!enabled.length) throw new Error(`ไม่พบเวลาใด ๆ ที่เลือกได้ในหน้านี้`);
-
-    let pick = null;
-
-    if (strategy === 'first') {
-      pick = enabled[0];
+  while (attempts < maxAttempts) {
+    if (mode === 'production') {
+      el = Array.from(document.querySelectorAll('button:not([class*="full"]):not([class*="disabled"]):not([disabled])'))
+        .find(b => b.textContent.trim() === day && b.offsetParent !== null);
+      if (el) { el.click(); addLog(`🎯 เลือกวันที่: ${day} แล้ว`, '#90EE90'); await SHORT_DELAY(); return; }
     } else {
-      // nearest: หาเวลาที่ใกล้เคียงที่สุดกับ target
-      const toMin = (s) => {
-        const [h,m] = s.split(':').map(Number);
-        return (h*60)+m;
-      };
-      const targetStr = /^\d{1,2}:\d{2}$/.test(String(timeOrRound))
-        ? String(timeOrRound)
-        : (() => {
-            // ถ้าเป็นเลขรอบ → map เวลา, ถ้าไม่ใช่ → ใช้ค่าแรกใน TIME_LIST
-            if (/^\d+$/.test(String(timeOrRound))) {
-              const idx = Number(timeOrRound);
-              return (idx>=1 && idx<=TIME_LIST.length) ? TIME_LIST[idx-1] : TIME_LIST[0];
-            }
-            return TIME_LIST[0];
-          })();
-
-      const targetMin = toMin(targetStr);
-      enabled.sort((a,b) => Math.abs(toMin(a.txt)-targetMin) - Math.abs(toMin(b.txt)-targetMin));
-      pick = enabled[0];
+      const xp = `//button[normalize-space()='${day}']`;
+      el = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+      if (el && el.offsetParent !== null && !el.hasAttribute('disabled')) { el.click(); addLog(`🎯 เลือกวันที่: ${day} แล้ว`, '#90EE90'); await SHORT_DELAY(); return; }
     }
-
-    await clickFast(pick.el);
-    addLog(`🔄 ใช้เวลาทดแทน: ${pick.txt}`, '#FFB6C1');
-    await SHORT_DELAY();
-    window.RB_LAST_SELECTION = { ...(window.RB_LAST_SELECTION||{}), time: pick.txt };
-    return;
+    attempts++; await new Promise(resolve => setTimeout(resolve, 30));
   }
+  throw new Error(`ไม่พบวันที่: ${day}`);
+}
+async function selectTimeOrRound(timeOrRound){
+  addLog(`⏰ เลือกเวลา: ${timeOrRound}`);
+  const mode = document.getElementById('rb-mode')?.value || 'trial';
 
+  let el = null;
+  let attempts = 0;
+  const maxAttempts = 2000;
+
+  while (attempts < maxAttempts) {
+    if (mode === 'production') {
+      el = Array.from(document.querySelectorAll('button:not([class*="full"]):not([class*="disabled"]):not([disabled])'))
+        .find(b => b.textContent.trim() === timeOrRound && b.offsetParent !== null);
+      if (el) { el.click(); addLog(`🎯 เลือกเวลา: ${timeOrRound} แล้ว`, '#90EE90'); await SHORT_DELAY(); return; }
+    } else {
+      const xp = `//button[normalize-space()='${timeOrRound}']`;
+      el = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+      if (el && el.offsetParent !== null && !el.hasAttribute('disabled')) { el.click(); addLog(`🎯 เลือกเวลา: ${timeOrRound} แล้ว`, '#90EE90'); await SHORT_DELAY(); return; }
+    }
+    attempts++; await new Promise(resolve => setTimeout(resolve, 30));
+  }
   throw new Error(`ไม่พบเวลา: ${timeOrRound}`);
 }
-
 async function waitForElementDynamic(xpath, maxWait = 8000) {
   const maxAttempts = Math.ceil(maxWait/50);
   for (let i = 0; i < maxAttempts; i++) {

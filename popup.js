@@ -67,35 +67,21 @@ class PopupController {
     });
   }
 
-async loadBranches() {
-  const siteSel = this.siteSelect.value || 'rocketbooking';
-  // map ให้เหมือน overlay
-  const siteMap = { 
-    'PopMart Thailand (Exclusive)': 'rocketbooking', // ถ้า value เป็นข้อความ ให้ map มาที่ key
-    'botautoq': 'botautoq',
-    'ithitec': 'ithitec',
-    'rocketbooking': 'rocketbooking',
-    'pm': 'botautoq',
-    'ith': 'ithitec',
-    'popmartrock': 'rocketbooking',
-  };
-  const siteKey = siteMap[siteSel] || siteSel || 'rocketbooking';
-
-  try {
-    const resp = await chrome.runtime.sendMessage({ action: 'getBranches', site: siteKey });
-    const branches = (resp && Array.isArray(resp.branches) && resp.branches.length)
-      ? resp.branches
-      : this.getStaticBranches(siteKey);
+	async loadBranches() {
+	const siteKey = this.siteSelect.value;
+	try {
+	const resp = await chrome.runtime.sendMessage({ action: 'getBranches', site: siteKey });
+    const branches = (resp && resp.branches) ? resp.branches : this.getStaticBranches(siteKey);
 
     this.branchSelect.innerHTML = '';
     branches.forEach(b => {
       const opt = document.createElement('option');
-      opt.value = b;
-      opt.textContent = b;
+      opt.value = b; opt.textContent = b;
       this.branchSelect.appendChild(opt);
     });
+    console.log(`✅ Loaded ${branches.length} branches for ${siteKey}`);
   } catch (e) {
-    // เผื่อ service worker ยังไม่ตื่น/ล่ม → ใช้ static
+    console.log('⚠️ getBranches failed, fallback static', e);
     const branches = this.getStaticBranches(siteKey);
     this.branchSelect.innerHTML = '';
     branches.forEach(b => {
@@ -105,7 +91,6 @@ async loadBranches() {
     });
   }
 }
-
   
   getStaticBranches(siteKey) {
     switch (siteKey) {

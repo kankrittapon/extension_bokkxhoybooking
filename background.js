@@ -1,7 +1,23 @@
-// === worker endpoints (เติม https:// อัตโนมัติ)
-const RAW_WORKER_BASE = "branch-api.kan-krittapon.workers.dev";
-function buildWorkerEndpoints() {
-  const base = RAW_WORKER_BASE.startsWith('http') ? RAW_WORKER_BASE : `https://${RAW_WORKER_BASE}`;
+// ======================
+// RocketBooker Background (Worker-aware)
+// ======================
+
+// ===== Worker endpoint config (มี default และรองรับ override ใน storage) =====
+const WORKER_BASE_DEFAULT = "https://branch-api.kan-krittapon.workers.dev";
+
+// เก็บ/อ่านฐาน URL ของ Worker (ถ้าอยากเปลี่ยนที่ runtime)
+async function setWorkerBase(url) {
+  await chrome.storage.local.set({ worker_base: url });
+}
+async function getWorkerBase() {
+  const { worker_base } = await chrome.storage.local.get("worker_base");
+  let base = (worker_base || WORKER_BASE_DEFAULT || "").trim();
+  if (!/^https?:\/\//i.test(base)) base = "https://" + base;            // กันพลาดลืมใส่ protocol
+  if (base.endsWith("/")) base = base.slice(0, -1);                     // ตัด slash ท้าย
+  return base;
+}
+async function buildWorkerEndpoints() {
+  const base = await getWorkerBase();
   return {
     branches: `${base}/branches`,
     config:   `${base}/config`,
@@ -9,80 +25,96 @@ function buildWorkerEndpoints() {
   };
 }
 
-// cache TTL
-const BRANCHES_TTL = 5 * 60 * 1000;
-const CONFIG_TTL   = 5 * 60 * 1000;
+// ===== Local caches (TTL) =====
+const BRANCHES_TTL = 5 * 60 * 1000; // 5 นาที
+const CONFIG_TTL   = 5 * 60 * 1000; // 5 นาที
 
-async function fetchJSON(url, opts={}) {
+// ===== Helpers =====
+async function fetchJSON(url, { method = "GET", headers = {}, body = null, timeout = 8000 } = {}) {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), opts.timeout || 8000);
+  const t = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const res = await fetch(url, { ...opts, signal: ctrl.signal, cache: 'no-store' });
-    if (!res.ok) throw new Error(`${res.status}`);
+    // เผื่อ url ไม่ใส่ protocol
+    if (!/^https?:\/\//i.test(url)) url = "https://" + url.replace(/^\/+/, "");
+    const res = await fetch(url, { method, headers, body, signal: ctrl.signal, cache: "no-store" });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     return await res.json();
-  } finally { clearTimeout(t); }
+  } finally {
+    clearTimeout(t);
+  }
 }
 
+// ===== API token helpers (อย่า hard-code token ในซอร์ส) =====
+async function setApiToken(token) {
+  await chrome.storage.local.set({ api_token: token });
+}
+async function getApiToken() {
+  const { api_token } = await chrome.storage.local.get("api_token");
+  return api_token ?? "";
+}
+
+// รับ /branches จาก Worker แล้ว cache ลง storage
 async function refreshBranchesFromWorker() {
   try {
-    const EP = buildWorkerEndpoints();
+    const EP = await buildWorkerEndpoints();
     const data = await fetchJSON(EP.branches);
-    if (!data?.ok || !Array.isArray(data.data)) {
-      // data.data อาจเป็น object { rocketbooking: [], ... } ก็รองรับ
-      if (data?.data && typeof data.data === 'object') {
-        await chrome.storage.local.set({
-          branches: data.data,
-          branches_updated_at: Date.now()
-        });
-        return { branches: data.data };
-      }
-      throw new Error('BAD_BRANCHES');
-    }
-    // ถ้า worker ส่ง array เดียวทั้งระบบ → ใส่ key "rocketbooking"
-    const map = { rocketbooking: data.data };
-    await chrome.storage.local.set({ branches: map, branches_updated_at: Date.now() });
-    return { branches: map };
+    // รองรับ 2 รูปแบบจาก Worker:
+    // - { ok:true, data: { rocketbooking:[], botautoq:[], ithitec:[], version, updated_at } }
+    // - { ok:true, data: { rocketbooking:[...]} } (ถ้าห่อจาก branch.json เดิม)
+    const map = (data?.data && typeof data.data === "object") ? data.data : {};
+    if (!Object.keys(map).length) throw new Error("empty branches map");
+
+    const payload = {
+      branches: map,
+      branches_version: data?.data?.version || Date.now(),
+      branches_updated_at: data?.data?.updated_at || Date.now()
+    };
+    await chrome.storage.local.set(payload);
+    return payload;
   } catch (e) {
-    console.warn('refreshBranchesFromWorker fail', e);
+    console.warn("refreshBranchesFromWorker failed:", e);
     return null;
   }
 }
 
-async function getBranchesForSite(siteKey) {
-  const key = ({ rocketbooking: "rocketbooking", botautoq: "botautoq", ithitec: "ithitec" }[siteKey]) || "rocketbooking";
+// ——— single-flight กัน refresh ซ้ำ ———
+let __branchesRefreshPromise = null;
 
-  try {
-    const refreshed = await refreshBranchesFromWorker();
-    if (refreshed && Array.isArray(refreshed.branches?.[key])) return refreshed.branches[key];
-  } catch (e) {
-    console.warn("fetch branches failed:", e);
-  }
-
-  // fallback (PC/Mobile safe)
-  return [
-    "Terminal 21","Centralworld","Siam Center","Seacon Square","MEGABANGNA",
-    "Central Westgate","Central Ladprao","Fashion Island","Emsphere","Central Pattaya",
-    "Central Chiangmai","Icon Siam","Central Dusit","Wacky Mart Event"
-  ];
+// map/normalize site key จาก UI → key ของ Worker
+function normalizeSiteKey(siteKey) {
+  const k = String(siteKey || '').toLowerCase();
+  if (k === 'pm' || k === 'botautoq') return 'botautoq';
+  if (k === 'ith' || k === 'ithitec') return 'ithitec';
+  if (k === 'popmartrock' || k === 'rocketbooking' || k === 'production') return 'rocketbooking';
+  return 'rocketbooking';
 }
 
-// === message router
-chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
-  (async () => {
-    try {
-      if (req?.action === 'getBranches') {
-        const list = await getBranchesForSite(req.site || 'rocketbooking');
-        sendResponse({ ok: true, branches: list });
-        return;
-      }
-      // …(action อื่น ๆ ของคุณเช่น getConfig / postLog)…
-      sendResponse({ ok: false, error: 'NO_ACTION' });
-    } catch (e) {
-      sendResponse({ ok: false, error: String(e) });
-    }
-  })();
-  return true; // สำคัญ: บอกว่าจะตอบ async
-});
+// อ่าน branches จาก cache (สด) หรือดึงใหม่จาก Worker
+async function getBranchesForSite(siteKey) {
+  const key = normalizeSiteKey(siteKey);
+
+  const stored = await chrome.storage.local.get(['branches', 'branches_updated_at']);
+  const bySite = stored.branches || {};
+  const fresh = stored.branches_updated_at && (Date.now() - stored.branches_updated_at < BRANCHES_TTL);
+
+  // cache สดและมีข้อมูล
+  if (fresh && Array.isArray(bySite[key]) && bySite[key].length) return bySite[key];
+
+  // กันยิงซ้ำระหว่างกำลัง refresh
+  if (!__branchesRefreshPromise) __branchesRefreshPromise = refreshBranchesFromWorker().finally(() => { __branchesRefreshPromise = null; });
+  const refreshed = await __branchesRefreshPromise;
+
+  if (refreshed && Array.isArray(refreshed.branches?.[key]) && refreshed.branches[key].length) {
+    return refreshed.branches[key];
+  }
+
+  // fallback สุดท้าย (ของเดิมในเครื่อง ถ้ามี) หรือรายการตั้งต้น
+  return bySite[key] || [
+    'Terminal 21','Centralworld','Siam Center','Seacon Square','MEGABANGNA',
+    'Central Westgate','Central Ladprao','Fashion Island','Emsphere','Central Pattaya',
+    'Central Chiangmai','Icon Siam','Central Dusit','Wacky Mart Event'
+  ];
+}
 
 // รับ /config จาก Worker แล้ว cache ลง storage
 async function refreshConfigFromWorker() {
