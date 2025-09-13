@@ -185,116 +185,178 @@ async function directFetchBranches(siteKey) {
   }
 }
 
-async function refreshBranchesIntoOverlay() {
+// ---- Keep last selection across panel openings ----
+let RB_LAST_SELECTION = { siteKey: null, branch: null, day: null, time: null };
+
+// helper: load/save last selection
+async function loadLastSelection() {
+  try {
+    const { rb_last_selection } = await chrome.storage.local.get('rb_last_selection');
+    if (rb_last_selection && typeof rb_last_selection === 'object') {
+      RB_LAST_SELECTION = rb_last_selection;
+    }
+  } catch {}
+}
+async function saveLastSelection() {
+  try {
+    const siteSel = document.getElementById('rb-site')?.value || 'pm';
+    const siteKey = mapSiteKeyForWorker(siteSel);
+    const branch = document.getElementById('rb-branch')?.value || '';
+    const day    = document.getElementById('rb-day')?.value || '';
+    const time   = document.getElementById('rb-time')?.value || '';
+    RB_LAST_SELECTION = { siteKey, branch, day, time };
+    await chrome.storage.local.set({ rb_last_selection: RB_LAST_SELECTION });
+  } catch {}
+}
+
+// ---- CACHED branches to avoid hammering source every time ----
+let BRANCH_CACHE = { data: {}, ts: 0 }; // { data: { [siteKey]: string[] }, ts: epoch_ms }
+
+async function refreshBranchesIntoOverlay({ preserveSelection = true, force = false } = {}) {
   const branchSelect = document.getElementById('rb-branch');
   if (!branchSelect) return;
 
-  // UI: กำลังโหลด…
-  branchSelect.innerHTML = '';
-  const loadingOpt = document.createElement('option');
-  loadingOpt.value = '';
-  loadingOpt.textContent = 'กำลังโหลด…';
-  branchSelect.appendChild(loadingOpt);
+  // load last selection first (so we can preserve)
+  await loadLastSelection();
 
-  try {
-    // map ค่า site ใน overlay -> key ฝั่ง worker/background
-    const siteSel = document.getElementById('rb-site')?.value || 'pm';
-    const siteKey = mapSiteKeyForWorker(siteSel);
+  const siteSel = document.getElementById('rb-site')?.value || 'pm';
+  const siteKey = mapSiteKeyForWorker(siteSel);
 
-    let list = [];
+  // remember previous (UI) + last selection (storage)
+  const prevUI = branchSelect.value || '';
+  const prevStored = (RB_LAST_SELECTION.siteKey === siteKey) ? (RB_LAST_SELECTION.branch || '') : '';
 
-    // 1) ขอจาก background (กัน service worker ไม่ตอบด้วย timeout)
+  // show "loading…" only if we really refetch
+  const showLoading = () => {
+    branchSelect.innerHTML = '';
+    const loadingOpt = document.createElement('option');
+    loadingOpt.value = '';
+    loadingOpt.textContent = 'กำลังโหลด…';
+    branchSelect.appendChild(loadingOpt);
+  };
+
+  // reuse cache if fresh within 60s (unless force)
+  const now = Date.now();
+  let list = [];
+  if (!force && BRANCH_CACHE.data[siteKey] && (now - BRANCH_CACHE.ts) < 60000) {
+    list = BRANCH_CACHE.data[siteKey].slice();
+  } else {
+    showLoading();
     try {
-      const bg = await new Promise((resolve) => {
-        let done = false;
-        const tid = setTimeout(() => { if (!done) resolve(null); }, 1200);
-        chrome.runtime.sendMessage({ action: 'getBranches', site: siteKey }, (resp) => {
-          if (done) return; done = true; clearTimeout(tid);
-          resolve(resp);
-        });
-      });
-      if (bg && bg.ok && Array.isArray(bg.branches)) list = bg.branches;
-    } catch {}
-
-    // 2) ถ้า background ไม่ได้ ให้ fetch ตรงจาก Worker (รองรับ iOS/Orion)
-    if (!list.length) {
-      list = await directFetchBranches(siteKey);
-    }
-
-    // 3) ถ้ายังว่าง ลองอ่าน cache เดิมจาก storage
-    if (!list.length) {
+      // 1) background
       try {
-        const { branches } = await chrome.storage.local.get('branches');
-        const cached = branches?.[siteKey];
-        if (Array.isArray(cached) && cached.length) list = cached;
+        const bg = await new Promise((resolve) => {
+          let done = false;
+          const tid = setTimeout(() => { if (!done) resolve(null); }, 1000);
+          chrome.runtime.sendMessage({ action: 'getBranches', site: siteKey }, (resp) => {
+            if (done) return; done = true; clearTimeout(tid);
+            resolve(resp);
+          });
+        });
+        if (bg && bg.ok && Array.isArray(bg.branches)) list = bg.branches;
       } catch {}
-    }
 
-    // 4) สุดท้ายจริง ๆ → ฮาร์ดโค้ด
-    if (!list.length) {
+      // 2) direct worker
+      if (!list.length) {
+        list = await directFetchBranches(siteKey);
+      }
+
+      // 3) local cache
+      if (!list.length) {
+        try {
+          const { branches } = await chrome.storage.local.get('branches');
+          const cached = branches?.[siteKey];
+          if (Array.isArray(cached) && cached.length) list = cached;
+        } catch {}
+      }
+
+      // 4) hardcoded fallback
+      if (!list.length) {
+        list = hardcodedBranches();
+        addLog('⚠ ใช้สาขาแบบฮาร์ดโค้ด (fallback)', '#FFB6C1');
+      }
+
+      // update caches
+      try {
+        const { branches = {} } = await chrome.storage.local.get('branches');
+        branches[siteKey] = list.slice();
+        await chrome.storage.local.set({ branches, branches_updated_at: Date.now() });
+      } catch {}
+      BRANCH_CACHE.data[siteKey] = list.slice();
+      BRANCH_CACHE.ts = Date.now();
+    } catch (e) {
       list = hardcodedBranches();
-      addLog('⚠ ใช้สาขาแบบฮาร์ดโค้ด (fallback)', '#FFB6C1');
+      addLog('⚠ โหลดสาขาไม่สำเร็จทั้งหมด → ใช้ฮาร์ดโค้ด', '#FFB6C1');
     }
-
-    // เก็บ cache (ใช้รอบหน้า)
-    try {
-      const { branches = {} } = await chrome.storage.local.get('branches');
-      branches[siteKey] = list.slice();
-      await chrome.storage.local.set({ branches, branches_updated_at: Date.now() });
-    } catch {}
-
-    // render ลง select
-    const prev = branchSelect.value;
-    branchSelect.innerHTML = '';
-    list.forEach(b => {
-      const opt = document.createElement('option');
-      opt.value = b; opt.textContent = b;
-      branchSelect.appendChild(opt);
-    });
-    if (prev && list.includes(prev)) branchSelect.value = prev;
-
-    // อัปเดตตัวแปรกลางด้วย (ถ้ามีที่อื่นอ้าง BRANCHES)
-    try { BRANCHES = list.slice(); } catch {}
-
-    addLog(`✅ โหลดสาขาแล้ว (${siteKey}) : ${list.length} รายการ`, '#90EE90');
-  } catch (e) {
-    // error หนักมาก → fallback ฮาร์ดโค้ด
-    const list = hardcodedBranches();
-    branchSelect.innerHTML = '';
-    list.forEach(b => {
-      const opt = document.createElement('option');
-      opt.value = b; opt.textContent = b;
-      branchSelect.appendChild(opt);
-    });
-    try { BRANCHES = list.slice(); } catch {}
-    addLog('⚠ โหลดสาขาไม่สำเร็จทั้งหมด → ใช้ฮาร์ดโค้ด', '#FFB6C1');
   }
+
+  // render
+  const keep = preserveSelection ? (prevUI || prevStored) : '';
+  branchSelect.innerHTML = '';
+  list.forEach(b => {
+    const opt = document.createElement('option');
+    opt.value = b; opt.textContent = b;
+    branchSelect.appendChild(opt);
+  });
+
+  // try to restore selection safely
+  if (keep && list.includes(keep)) {
+    branchSelect.value = keep;
+  } else if (preserveSelection && prevUI && list.includes(prevUI)) {
+    branchSelect.value = prevUI;
+  } else if (preserveSelection && prevStored && list.includes(prevStored)) {
+    branchSelect.value = prevStored;
+  }
+  // update global BRANCHES for other scanners
+  try { BRANCHES = list.slice(); } catch {}
+
+  // persist current selection after render
+  await saveLastSelection();
+
+  addLog(`✅ โหลดสาขาแล้ว (${siteKey}) : ${list.length} รายการ`, '#90EE90');
 }
 
 
-/* ===== UI wiring ===== */
+
+/* ===== UI wiring (ต่อจากโค้ดด้านบน) ===== */
 setTimeout(function() {
-  const rocket = document.getElementById('rb-rocket');
-  const panel = document.getElementById('rb-panel');
-  const closeBtn = document.getElementById('rb-close');
+  const rocket     = document.getElementById('rb-rocket');
+  const panel      = document.getElementById('rb-panel');
+  const closeBtn   = document.getElementById('rb-close');
   const modeSelect = document.getElementById('rb-mode');
   const siteSelect = document.getElementById('rb-site');
 
-rocket?.addEventListener('click', function() {
-  if (panel.style.display === 'none' || !panel.style.display) {
-    panel.style.display = 'block';
-    checkStatus();
-    setOverlayStatusBadge();      // รีเฟรชข้อความ Mode/Manual/Delay
-    refreshBranchesIntoOverlay(); // โหลดสาขาล่าสุดจาก background
-  } else {
-    panel.style.display = 'none';
-  }
-});
+  // 🚀 toggle panel (ใช้ preserveSelection และไม่ force)
+  rocket?.addEventListener('click', function() {
+    if (panel.style.display === 'none' || !panel.style.display) {
+      panel.style.display = 'block';
+      checkStatus();
+      setOverlayStatusBadge();
+      refreshBranchesIntoOverlay({ preserveSelection: true, force: false });
+
+      // restore day/time ตามค่าเดิมถ้า siteKey ตรง
+      (async () => {
+        await loadLastSelection();
+        const daySel  = document.getElementById('rb-day');
+        const timeSel = document.getElementById('rb-time');
+        const siteSel = document.getElementById('rb-site')?.value || 'pm';
+        const siteKey = mapSiteKeyForWorker(siteSel);
+        if (RB_LAST_SELECTION.siteKey === siteKey) {
+          if (daySel && RB_LAST_SELECTION.day)  daySel.value  = String(RB_LAST_SELECTION.day);
+          if (timeSel && RB_LAST_SELECTION.time) timeSel.value = RB_LAST_SELECTION.time;
+        }
+      })();
+    } else {
+      panel.style.display = 'none';
+    }
+  });
+
   closeBtn?.addEventListener('click', function(){ panel.style.display = 'none'; });
 
+  // เปลี่ยนโหมด → force refresh แต่คง selection ถ้ายังมี
   modeSelect?.addEventListener('change', function() {
     const mode = this.value;
-    const siteSection = document.getElementById('rb-site-section');
+    const siteSection       = document.getElementById('rb-site-section');
     const productionOptions = document.getElementById('rb-production-options');
 
     if (mode === 'trial') {
@@ -310,31 +372,64 @@ rocket?.addEventListener('click', function() {
       siteSelect.innerHTML = `<option value="popmartrock">PopMart Thailand</option>`;
     }
     checkStatus();
-	setOverlayStatusBadge();
-	refreshBranchesIntoOverlay();
+    setOverlayStatusBadge();
+    refreshBranchesIntoOverlay({ preserveSelection: true, force: true });
   });
 
+  // เปลี่ยนไซต์ → force refresh แต่พยายามคง selection
   siteSelect?.addEventListener('change', () => {
-  checkStatus();
-  setOverlayStatusBadge();
-  refreshBranchesIntoOverlay();
-});
+    checkStatus();
+    setOverlayStatusBadge();
+    refreshBranchesIntoOverlay({ preserveSelection: true, force: true });
+  });
 
-  // populate selects
-  refreshBranchesIntoOverlay();
+  // --- populate selects ---
+  refreshBranchesIntoOverlay({ preserveSelection: true, force: false });
+
   const daySelect = document.getElementById('rb-day');
   if (daySelect) {
     daySelect.innerHTML = '';
-    for (let d=1; d<=31; d++){ const o=document.createElement('option'); o.value=o.textContent=String(d); daySelect.appendChild(o); }
+    for (let d = 1; d <= 31; d++) {
+      const o = document.createElement('option');
+      o.value = o.textContent = String(d);
+      daySelect.appendChild(o);
+    }
   }
+
   const timeSelect = document.getElementById('rb-time');
   if (timeSelect) {
     timeSelect.innerHTML = '';
-    ['10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00','19:30','20:00','20:30','21:00','21:30','22:00','22:30','23:00']
-      .forEach(t => { const o=document.createElement('option'); o.value=t; o.textContent=t; timeSelect.appendChild(o); });
+    [
+      '10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
+      '15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00',
+      '19:30','20:00','20:30','21:00','21:30','22:00','22:30','23:00'
+    ].forEach(t => {
+      const o = document.createElement('option');
+      o.value = t; o.textContent = t;
+      timeSelect.appendChild(o);
+    });
   }
 
+  // 🔁 restore day/time ตอน init ครั้งแรก (branch จะ restore ใน refreshBranchesIntoOverlay แล้ว)
+  (async () => {
+    await loadLastSelection();
+    const daySel  = document.getElementById('rb-day');
+    const timeSel = document.getElementById('rb-time');
+    const siteSel = document.getElementById('rb-site')?.value || 'pm';
+    const siteKey = mapSiteKeyForWorker(siteSel);
+    if (RB_LAST_SELECTION.siteKey === siteKey) {
+      if (daySel && RB_LAST_SELECTION.day)  daySel.value  = String(RB_LAST_SELECTION.day);
+      if (timeSel && RB_LAST_SELECTION.time) timeSel.value = RB_LAST_SELECTION.time;
+    }
+  })();
+
+  // ⏯ start booking
   document.getElementById('rb-start')?.addEventListener('click', startBooking);
+
+  // 💾 remember selection on change (ย้ายมาไว้ใน init block)
+  document.getElementById('rb-branch')?.addEventListener('change', saveLastSelection);
+  document.getElementById('rb-day')?.addEventListener('change', saveLastSelection);
+  document.getElementById('rb-time')?.addEventListener('change', saveLastSelection);
 
 }, 100);
 
@@ -675,6 +770,7 @@ async function clickRegister(){
 function isBranchPageVisibleNow(){
   try {
     if (document.querySelector('[data-testid="branch-selection"]')) return true;
+    if (document.querySelector('div.branch-item')) return true;   // ✅ เพิ่มตรงนี้
     for (const name of BRANCHES){
       const xp = `//div//*[normalize-space()='${name}']`;
       const el = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
@@ -745,6 +841,34 @@ function quickFindBranch(name){
   }
   return null;
 }
+// --- แกร่งขึ้น: หา branch ตาม DOM จริง + รองรับ ant/React event delegation ---
+function findBranchElementByName(name) {
+  const norm = (s)=>String(s||'').replace(/\s+/g,' ').trim().toLowerCase();
+  const target = norm(name);
+
+  // A) ตรงแบบ oldsource: div.branch-item ที่ไม่เต็ม/ไม่ disabled
+  const branchItems = document.querySelectorAll("div.branch-item:not([class*='full']):not([class*='disabled'])");
+  for (const el of branchItems) {
+    const t = norm(el.textContent);
+    if (t && (t === target || t.includes(target))) return el; // คลิก container ให้ lib/antd จัดการ
+  }
+
+  // B) ปุ่ม/role=button (กรณีบางสาขาเรนเดอร์เป็นปุ่ม)
+  const btns = document.querySelectorAll("button:not([class*='full']):not([class*='disabled']):not([disabled]), [role='button']");
+  for (const b of btns) {
+    const t = norm(b.textContent || b.innerText);
+    if (t && (t === target || t.includes(target))) return b;
+  }
+
+  // C) fallback: text node ใน div/span ทั่วไป
+  const textNodes = document.querySelectorAll("div,span,li,a");
+  for (const d of textNodes) {
+    const t = norm(d.textContent || d.innerText);
+    if (t && (t === target || t.includes(target))) return d;
+  }
+
+  return null;
+}
 async function selectBranch(name){
   addLog(`🏢 เลือกสาขา: ${name}`);
 
@@ -755,81 +879,60 @@ async function selectBranch(name){
   else if (currentSite === 'pm') branchWait = 600;
   await new Promise(r => setTimeout(r, branchWait));
 
-  let el = quickFindBranch(name);
-  if (!el) {
-    addLog(`⚠️ ไม่เจอสาขา ${name} รอสักครู่...`, '#FFB6C1');
-    const t0 = performance.now();
+let el = findBranchElementByName(name);
+if (!el) {
+  addLog(`⚠️ ไม่เจอสาขา ${name} รอสักครู่...`, '#FFB6C1');
+  const t0 = performance.now();
 
-    await new Promise((resolve, reject) => {
-      let done = false;
-      const resolveOnce = (v) => { if (done) return; done = true; resolve(v); };
-      const rejectOnce  = (e) => { if (done) return; done = true; reject(e); };
+  await new Promise((resolve, reject) => {
+    let done = false;
+    const resolveOnce = (v) => { if (done) return; done = true; resolve(v); };
+    const rejectOnce  = (e) => { if (done) return; done = true; reject(e); };
 
-      const poll = setInterval(async () => {
-        if (window.isStopped) { clearInterval(poll); return rejectOnce(new Error('STOPPED')); }
+    const poll = setInterval(async () => {
+      if (window.isStopped) { clearInterval(poll); return rejectOnce(new Error('STOPPED')); }
 
-        el = quickFindBranch(name);
-        if (el) {
-          clearInterval(poll);
-          addLog(`✅ เจอสาขา ${name} แล้ว!`, '#90EE90');
-          return resolveOnce();
-        }
+      // ลองหาใหม่ด้วยตัว “แกร่งขึ้น”
+      el = findBranchElementByName(name);
+      if (el) {
+        clearInterval(poll);
+        addLog(`✅ เจอสาขา ${name} แล้ว!`, '#90EE90');
+        return resolveOnce();
+      }
 
-        if (performance.now() - t0 > 10000) {
-          clearInterval(poll);
+      if (performance.now() - t0 > 10000) {
+        clearInterval(poll);
 
-          if (mode === 'production') {
-            addLog('🔄 ปิด popup/Modal และคลิกพื้นที่ว่าง...', '#FFB6C1');
-            try {
-              try { await closeAnyModalIfPresent(); } catch {}
-              try {
-                document.querySelectorAll('span[role="img"][aria-label="close"], button[aria-label="close"]').forEach(x => x.click());
-              } catch {}
-              setTimeout(() => {
-                const centerX = window.innerWidth / 2;
-                const centerY = window.innerHeight / 2;
-                try { document.elementFromPoint(centerX, centerY)?.click(); } catch {}
-                setTimeout(() => {
-                  el = quickFindBranch(name);
-                  if (el) {
-                    addLog(`✅ เจอสาขา ${name} หลังคลิกพื้นที่ว่าง!`, '#90EE90');
-                    return resolveOnce();
-                  }
-                  for (const branch of BRANCHES) {
-                    el = quickFindBranch(branch);
-                    if (el) {
-                      addLog(`🔄 ใช้สาขาทดแทน: ${branch}`, '#FFB6C1');
-                      return resolveOnce();
-                    }
-                  }
-                  return rejectOnce(new Error('Branch not found even after clicking area'));
-                }, 250);
-              }, 150);
-            } catch (e) {
-              console.log('Click area error:', e);
-              return rejectOnce(e);
-            }
-          } else {
-            for (const branch of BRANCHES) {
-              el = quickFindBranch(branch);
-              if (el) {
-                addLog(`🔄 ใช้สาขาทดแทน: ${branch}`, '#FFB6C1');
-                return resolveOnce();
-              }
-            }
-            return rejectOnce(new Error('No branches found'));
+        // ปิด modal / เคลียร์ overlay แล้วลองหาอีกรอบ
+        try { await closeAnyModalIfPresent(); } catch {}
+        setTimeout(() => {
+          el = findBranchElementByName(name);
+          if (el) {
+            addLog(`✅ เจอสาขา ${name} หลังปิด modal!`, '#90EE90');
+            return resolveOnce();
           }
-        }
-      }, POLL_MS);
-    });
-  }
 
-  if (!el) throw new Error('Branch element not found');
+          // fallback สุดท้าย: ลองเลือกสาขาแรกที่ไม่เต็ม (แนว oldsource)
+          const any = document.querySelector("div.branch-item:not([class*='full']):not([class*='disabled'])");
+          if (any) {
+            el = any;
+            addLog('🔄 ไม่เจอชื่อเป๊ะ ใช้สาขาทดแทนตัวแรก (not full)', '#FFB6C1');
+            return resolveOnce();
+          }
+          return rejectOnce(new Error('Branch not found'));
+        }, 150);
+      }
+    }, POLL_MS);
+  });
+}
 
-  addLog(`🎯 กำลังคลิกสาขา...`, '#87CEEB');
-  await clickFast(el);
-  addLog(`✅ คลิกสาขาแล้ว!`, '#90EE90');
-  await new Promise(r => setTimeout(r, 500));
+if (!el) throw new Error('Branch element not found');
+
+// ให้แน่ใจว่า element มองเห็น/คลิกได้
+try { el.scrollIntoView({ block:'center' }); } catch {}
+await clickFast(el); // ใช้ clickFast เพื่อรอ enable/visibility เหมือนเดิม
+addLog(`✅ คลิกสาขาแล้ว!`, '#90EE90');
+await new Promise(r => setTimeout(r, 500));
 }
 async function selectDate(day){
   addLog(`📅 เลือกวันที่: ${day}`);
