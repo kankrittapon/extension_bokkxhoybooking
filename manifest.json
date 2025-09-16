@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "BokkChoYxBooking",
-  "version": "1.0.0",
-  "description": "Auto booking extension for PopMart Thailand",
+  "version": "1.0.1",
+  "description": "`NK'Krittapon Madsen ระบบทดลองจอง POPMART",
 
   "permissions": [
     "activeTab",
