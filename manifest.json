@@ -14,6 +14,7 @@
   "host_permissions": [
     "https://popmartth.rocket-booking.app/*",
     "https://pmrocketbotautoq.web.app/*",
+    "https://botautoq.web.app/*",
     "https://popmart.ithitec.com/*",
     "https://access.line.me/*",
     "https://branch-api.kan-krittapon.workers.dev/*"
@@ -42,6 +43,7 @@
       "matches": [
         "https://popmartth.rocket-booking.app/*",
         "https://pmrocketbotautoq.web.app/*",
+        "https://botautoq.web.app/*",
         "https://popmart.ithitec.com/*",
         "https://access.line.me/*"
       ],

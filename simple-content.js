@@ -13,7 +13,7 @@ let isRunning = false;
 function detectSite() {
   const url = window.location.href;
   if (url.includes('popmartth.rocket-booking.app')) return 'popmartrock';
-  if (url.includes('botautoq.web.app')) return 'pm';
+  if (url.includes('botautoq.web.app') || url.includes('pmrocketbotautoq.web.app')) return 'pm';
   if (url.includes('popmart.ithitec.com')) return 'ith';
   return null;
 }
@@ -556,14 +556,99 @@ function makeGoldenTicket() {
   // === golden ticket ===
   return btoa(JSON.stringify(fakeData)).substring(0, 256);
 }
+// === PATCH: React/Shadow-DOM scanners (put above handleMinigame) ===
+function forEachNodeDeep(root, visit) {
+  const stack = [root];
+  const seen  = new Set();
+  while (stack.length) {
+    const el = stack.pop();
+    if (!el || seen.has(el)) continue;
+    seen.add(el);
+    try { visit(el); } catch {}
+
+    // Shadow DOM
+    const sr = el.shadowRoot;
+    if (sr && sr.children) for (const c of sr.children) stack.push(c);
+
+    // Light DOM
+    if (el.children) for (const c of el.children) stack.push(c);
+  }
+}
+
+// หา callback ที่น่าจะเป็น success ของมินิเกมใน React tree
+function collectReactSuccessCallbacks(limit = 50) {
+  const out = [];
+  forEachNodeDeep(document.body, (el) => {
+    for (const k in el) {
+      if (!k.startsWith('__reactFiber$') && !k.startsWith('__reactProps$')) continue;
+      const fiber = el[k]?.return?.return || el[k]?.return || el[k];
+      const props = fiber?.memoizedProps || fiber?.pendingProps || el[k]?.memoizedProps || el[k]?.pendingProps;
+      const cb = props && (props.onSuccess || props.onSolved || props.onsuccess || props.handleSuccess);
+      if (typeof cb === 'function') {
+        out.push({ el, cb });
+        if (out.length >= limit) return;
+      }
+    }
+  });
+  return out;
+}
+
+// ยิง "golden ticket" ใส่ callback ที่เจอทั่วทั้งหน้า
+async function pushGoldenTicketGlobally() {
+  const ticket = (typeof makeGoldenTicket === 'function') ? makeGoldenTicket() : 'ticket';
+  const cbs = collectReactSuccessCallbacks(80);
+  let fired = false;
+
+  for (const { cb } of cbs) {
+    try { cb(ticket); fired = true; } catch {}
+    if (!fired) { try { cb({ goldenTicket: true, ticket }); fired = true; } catch {} }
+  }
+  return fired;
+}
+
+// หา host ของมินิเกมแบบ "ลึก" + รอ DOM โผล่ช่วงสั้น ๆ
+async function findMinigameHostDeep(selectors, maxWaitMs = 1500) {
+  let found = null;
+
+  const scan = () => {
+    forEachNodeDeep(document.documentElement, (el) => {
+      if (found) return;
+      for (const s of selectors) {
+        try {
+          if (el.matches?.(s)) { found = el; return; }
+        } catch {}
+      }
+    });
+  };
+
+  // เผื่อ host โผล่แล้ว
+  scan();
+  if (found) return found;
+
+  // รอ mutation สั้น ๆ
+  return await new Promise((resolve) => {
+    const mo = new MutationObserver(() => {
+      if (found) return;
+      scan();
+      if (found) { mo.disconnect(); resolve(found); }
+    });
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+
+    setTimeout(() => { mo.disconnect(); resolve(found); }, maxWaitMs);
+  });
+}
 
 /* ===== Minigame (ithitec) ===== */
+/* ===== Minigame (ithitec / popmartrock) ===== */
 async function handleMinigame() {
-  const site = (typeof detectSite === 'function') ? detectSite() : (location.hostname.includes('ithitec') ? 'ith' : null);
+  const site = (typeof detectSite === 'function') ? detectSite()
+              : (location.hostname.includes('ithitec') ? 'ith' : null);
 
+  // --- ithitec: มีทั้ง 3D rotation และบางครั้งเป็น React minigame ---
   if (site === 'ith') {
-    addLog('🎮 ตรวจสอบมินิเกม (ithitec: 3D rotation)...', '#87CEEB');
+    addLog('🎮 ตรวจสอบมินิเกม (ithitec: 3D rotation/React)...', '#87CEEB');
 
+    // 1) 3D rotation captcha
     const viewport = document.getElementById('captcha-viewport');
     if (viewport) {
       addLog('🔍 พบ 3D Rotation Captcha', '#87CEEB');
@@ -571,12 +656,13 @@ async function handleMinigame() {
       if (solved) { addLog('✅ 3D Rotation แก้แล้ว!', '#90EE90'); return true; }
     }
 
-    // บางครั้ง ithitec อาจแสดง React minigame ด้วย
+    // 2) React minigame (ถ้ามี)
     const reactContainer = document.querySelector('.sc-623bb80d-0');
     if (reactContainer) {
       addLog('🔍 พบ React Minigame (ithitec)', '#87CEEB');
       const ok = await pushGoldenTicketToReact('.sc-623bb80d-0');
       if (ok) { addLog('✅ Golden Ticket ส่งสำเร็จ!', '#90EE90'); return true; }
+
       const bypassed = await tryBypassReactMinigame();
       if (bypassed) { addLog('✅ Minigame bypass สำเร็จ!', '#90EE90'); return true; }
     }
@@ -585,38 +671,60 @@ async function handleMinigame() {
     return false;
   }
 
+  // --- popmartrock: React minigame เป็นหลัก ---
   if (site === 'popmartrock') {
     addLog('🎮 ตรวจสอบมินิเกม (popmartrock: React)...', '#87CEEB');
+
+    // ขยาย selector ให้ครอบกรณีคลาส/hash เปลี่ยน
     const selectors = [
       '.sc-623bb80d-0',
       '[data-minigame-root]',
-      '.react-captcha-root'
+      '.react-captcha-root',
+      '[class*="captcha"]',
+      '[class*="minigame"]',
+      '[id*="captcha"]',
+      '[id*="minigame"]'
     ];
-    let hostSel = null;
-    for (const s of selectors) {
-      const el = document.querySelector(s);
-      if (el) { hostSel = s; break; }
+
+    // ✅ ค้น host แบบลึก (รวม Shadow DOM) + รอ mutation ช่วงสั้น ๆ
+    const host = await findMinigameHostDeep(selectors, 1500);
+
+    // ✅ ยิง callback แบบ global ก่อน (ไม่ผูกกับโครง DOM)
+    const firedGlobal = await pushGoldenTicketGlobally();
+    if (firedGlobal) {
+      addLog('✅ Golden Ticket (global) สำเร็จ!', '#90EE90');
+      return true;
     }
 
-    if (!hostSel) {
-      addLog('✅ ไม่พบมินิเกม (popmartrock)', '#90EE90');
-      return false;
+    // ถ้าเจอ host ก็ลองเจาะจงด้วย selector ที่คาดหวัง
+    if (host) {
+      addLog('🔍 พบ React Minigame host', '#87CEEB');
+      const ok = await pushGoldenTicketToReact('.sc-623bb80d-0')
+             ||  await pushGoldenTicketToReact('[data-minigame-root]')
+             ||  await pushGoldenTicketToReact('.react-captcha-root');
+      if (ok) {
+        addLog('✅ Golden Ticket (host) ส่งสำเร็จ!', '#90EE90');
+        return true;
+      }
     }
 
-    addLog('🔍 พบ React Minigame', '#87CEEB');
-    const ok = await pushGoldenTicketToReact(hostSel);
-    if (ok) { addLog('✅ Golden Ticket ส่งสำเร็จ!', '#90EE90'); return true; }
-
+    // แผนสำรอง: bypass แบบสแกน props ทั้งหน้า
     const bypassed = await tryBypassReactMinigame();
-    if (bypassed) { addLog('✅ Minigame bypass สำเร็จ!', '#90EE90'); return true; }
+    if (bypassed) {
+      addLog('✅ Minigame bypass สำเร็จ!', '#90EE90');
+      return true;
+    }
 
-    addLog('⚠️ ส่ง Golden Ticket/BYPASS ไม่สำเร็จ', '#FFB6C1');
+    addLog('✅ ไม่พบมินิเกม (popmartrock)', '#90EE90');
     return false;
   }
 
+  // ไซต์อื่น ๆ
   addLog('🎮 ไม่มีมินิเกมสำหรับไซต์นี้', '#87CEEB');
   return false;
 }
+
+
 async function solve3DRotation() {
   try {
     const viewport = document.getElementById('captcha-viewport');
@@ -685,56 +793,72 @@ async function tryBypassReactMinigame(){
   } catch {}
   return false;
 }
+// --- helper ใหม่: ไต่ขึ้น element ที่เป็นปุ่มจริง
+function resolveClickable(el) {
+  if (!el) return el;
+  return el.closest?.('button,[role="button"],.ant-btn') || el;
+}
+
+// --- helper ใหม่: เช็ค disabled แบบที่ antd ใช้จริง
+function looksDisabled(el) {
+  if (!el) return true;
+  const cs = getComputedStyle(el);
+  const ariaDis = el.getAttribute('aria-disabled') === 'true';
+  const byAttr  = !!el.disabled;
+  const byClass = /\b(disabled|ant-btn-disabled|loading)\b/i.test(el.className);
+  const peNone  = cs.pointerEvents === 'none';
+  const notAllowed = cs.cursor === 'not-allowed';
+  // หมายเหตุ: ไม่ผูกกับ “สีเทา” อีกต่อไป เพราะธีมบางตัวสีไม่เปลี่ยน
+  return ariaDis || byAttr || byClass || peNone || notAllowed;
+}
+
 async function waitRegisterReady({
-  xpath = "//button[normalize-space()='Register'] | //div//*[normalize-space()='Register'] | //button[normalize-space()='ลงทะเบียน']",
-  timeoutMs = 600000 // 10 นาที ปรับได้
+  // เลือก ancestor ที่เป็นปุ่มตั้งแต่ต้นทาง
+  xpath = "" +
+    // text ‘Register/ลงทะเบียน’ แล้วไต่ขึ้นไปปุ่ม
+    "//*[normalize-space(text())='Register' or normalize-space(text())='ลงทะเบียน']" +
+    "/ancestor-or-self::button | " +
+    "//*[normalize-space(text())='Register' or normalize-space(text())='ลงทะเบียน' and @role='button'] | " +
+    // ปุ่มที่มี text ตรงๆ
+    "//button[normalize-space()='Register' or normalize-space()='ลงทะเบียน']",
+  timeoutMs = 600000
 } = {}) {
-  const disabledLooksGray = (rgb) => {
-    // heuristic กันสีเทาหลายเฉด ไม่ผูก 222 เดี่ยว ๆ
-    const m = (rgb || '').match(/\d+/g);
-    if (!m) return false;
-    const [r,g,b] = m.map(Number);
-    const close = Math.abs(r-g) < 10 && Math.abs(g-b) < 10;
-    return close && r < 200; // โทนเทาเข้ม ๆ = ยังไม่ active
+  const t0 = performance.now();
+
+  const evalOne = () => {
+    const n = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+    return resolveClickable(n);
   };
 
-  const nowBtn = () => document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-
-  let btn = nowBtn();
+  let btn = evalOne();
   if (!btn) {
-    // รอให้ปุ่มโผล่มาก่อน
-    btn = await waitXPath(xpath, 15000); // มีอยู่แล้วในไฟล์นี้
+    // รอให้โหนดที่มี text โผล่ก่อน แล้วค่อยไต่ขึ้นไปเป็นปุ่ม
+    const textNode = await waitXPath("//*[normalize-space(text())='Register' or normalize-space(text())='ลงทะเบียน']", 15000);
+    btn = resolveClickable(textNode);
   }
+  if (btn && !looksDisabled(btn)) return btn;
 
-  // พร้อมแล้ว? (ไม่ disabled + ไม่เทา)
-  const ok = (node) => {
-    if (!node) return false;
-    const style = getComputedStyle(node);
-    const ariaDisabled = node.getAttribute('aria-disabled') === 'true';
-    return !node.disabled && !ariaDisabled && !disabledLooksGray(style.backgroundColor);
-  };
-  if (ok(btn)) return btn;
-
-  // เฝ้า attributes + re-query กันโดน re-render
+  // เฝ้าดูการเปลี่ยนแปลง + re-query กันโดน re-render
   return await new Promise((resolve, reject) => {
-    const t0 = performance.now();
     const check = () => {
-      const current = nowBtn();
-      if (ok(current)) { resolve(current); return true; }
+      // ปุ่มอาจถูกแทนที่ทั้งโหนด → query ใหม่ทุกครั้ง
+      const current = evalOne();
+      if (current && !looksDisabled(current)) { resolve(current); return true; }
       if (performance.now() - t0 > timeoutMs) { reject(new Error('Timeout waiting Register active')); return true; }
       return false;
     };
 
-    const mo = new MutationObserver(() => { if (check()) mo.disconnect(); });
-    // observe โหนดปุ่มแรกที่เจอ; ถ้าเว็บ re-render เราก็ re-query ใน check()
-    mo.observe(btn, { attributes: true, attributeFilter: ['class','style','disabled','aria-disabled'] });
+    // Observe ทั้ง document แทนการผูกกับโหนดเดียว (ป้องกันโดน replace)
+    const mo = new MutationObserver(() => { check() && mo.disconnect(); });
+    mo.observe(document.documentElement, { attributes: true, childList: true, subtree: true });
 
-    // safety poll เผื่อปุ่มถูกแทนที่ทั้งโหนด
+    // Safety poll เผื่อหลุด observe
     const iv = setInterval(() => {
       if (check()) { clearInterval(iv); mo.disconnect(); }
     }, 80);
   });
 }
+
 
 /* ===== Booking steps ===== */
 async function clickRegister(){
@@ -745,7 +869,7 @@ async function clickRegister(){
   if ((mode === 'production' && manualRegister) || opts.manualRegister === true) {
     addLog('👆 โหมดกด Register ด้วยตัวเอง - รอให้ผู้ใช้กด...', '#FFB6C1');
     while (true) {
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(r => setTimeout(r, 500));
       const currentUrl = window.location.href;
       if (currentUrl.includes('/branch') || currentUrl.includes('/booking') || document.querySelector('[data-testid="branch-selection"]')) {
         addLog('✅ ผู้ใช้กด Register แล้ว!', '#90EE90');
@@ -756,15 +880,15 @@ async function clickRegister(){
   }
 
   addLog('🔍 หา Register…');
-	const xp = "//button[normalize-space()='Register'] | //div//*[normalize-space()='Register'] | //button[normalize-space()='ลงทะเบียน']";
-	const el = await waitRegisterReady({ xpath: xp, timeoutMs: 600000 }); // รอจน active จริง
-	if (opts && typeof opts.registerDelay === 'number' && opts.registerDelay > 0) {
-	await new Promise(r=>setTimeout(r, opts.registerDelay));
-	}
-	await clickFast(el);
+  const el = await waitRegisterReady({ timeoutMs: 600000 }); // รอจน “ปุ่มจริง” พร้อม
+  if (opts && typeof opts.registerDelay === 'number' && opts.registerDelay > 0) {
+    await new Promise(r=>setTimeout(r, opts.registerDelay));
+  }
+  await clickFast(el); // clickFast ยังกัน visibility/pointer-events เพิ่มอีกชั้น
   addLog('🎯 Register แล้ว', '#90EE90');
   await SHORT_DELAY();
 }
+
 
 // Detect if branch selection page is visible
 function isBranchPageVisibleNow(){
@@ -850,7 +974,8 @@ function findBranchElementByName(name) {
   const branchItems = document.querySelectorAll("div.branch-item:not([class*='full']):not([class*='disabled'])");
   for (const el of branchItems) {
     const t = norm(el.textContent);
-    if (t && (t === target || t.includes(target))) return el; // คลิก container ให้ lib/antd จัดการ
+    if (t && (t === target || t.includes(target))) return el;
+    if (t && (t === target || t.includes(target))) return resolveClickable(el); // คลิก container ให้ lib/antd จัดการ
   }
 
   // B) ปุ่ม/role=button (กรณีบางสาขาเรนเดอร์เป็นปุ่ม)
@@ -858,6 +983,7 @@ function findBranchElementByName(name) {
   for (const b of btns) {
     const t = norm(b.textContent || b.innerText);
     if (t && (t === target || t.includes(target))) return b;
+    if (t && (t === target || t.includes(target))) return resolveClickable(b);
   }
 
   // C) fallback: text node ใน div/span ทั่วไป
@@ -865,6 +991,7 @@ function findBranchElementByName(name) {
   for (const d of textNodes) {
     const t = norm(d.textContent || d.innerText);
     if (t && (t === target || t.includes(target))) return d;
+    if (t && (t === target || t.includes(target))) return resolveClickable(d);
   }
 
   return null;
@@ -946,7 +1073,7 @@ async function selectDate(day){
     if (mode === 'production') {
       el = Array.from(document.querySelectorAll('button:not([class*="full"]):not([class*="disabled"]):not([disabled])'))
         .find(b => b.textContent.trim() === day && b.offsetParent !== null);
-      if (el) { el.click(); addLog(`🎯 เลือกวันที่: ${day} แล้ว`, '#90EE90'); await SHORT_DELAY(); return; }
+      if (el) { el.click(); await clickFast(el); addLog(`🎯 เลือกวันที่: ${day} แล้ว`, '#90EE90'); await SHORT_DELAY(); return; }
     } else {
       const xp = `//button[normalize-space()='${day}']`;
       el = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
@@ -968,7 +1095,7 @@ async function selectTimeOrRound(timeOrRound){
     if (mode === 'production') {
       el = Array.from(document.querySelectorAll('button:not([class*="full"]):not([class*="disabled"]):not([disabled])'))
         .find(b => b.textContent.trim() === timeOrRound && b.offsetParent !== null);
-      if (el) { el.click(); addLog(`🎯 เลือกเวลา: ${timeOrRound} แล้ว`, '#90EE90'); await SHORT_DELAY(); return; }
+      if (el) { el.click(); await clickFast(el); addLog(`🎯 เลือกเวลา: ${timeOrRound} แล้ว`, '#90EE90'); await SHORT_DELAY(); return; }
     } else {
       const xp = `//button[normalize-space()='${timeOrRound}']`;
       el = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
