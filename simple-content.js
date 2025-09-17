@@ -1,3 +1,24 @@
+
+// สร้างหน้าต่าง log แยกฝั่งขวา (inline, ไม่ใช้ import)
+if (!document.getElementById('rb-log-panel')) {
+  const logPanel = document.createElement('div');
+  logPanel.id = 'rb-log-panel';
+  logPanel.style.cssText = `
+    position:fixed;top:20px;right:40px;z-index:999999999;width:340px;
+    background:#222;border-radius:12px;color:white;padding:18px;
+    box-shadow:0 4px 20px rgba(0,0,0,0.3);font-family:monospace;
+    max-height:80vh;overflow-y:auto;display:block;
+  `;
+  logPanel.innerHTML = `
+    <div style="font-weight:bold;font-size:15px;margin-bottom:10px;">📋 Log</div>
+    <div id="rb-log-content" style="background:rgba(0,0,0,0.5);border-radius:6px;padding:10px;max-height:60vh;overflow-y:auto;font-size:13px;text-align:left;">
+      <div style="color:#87CEEB;">🚀 RocketBooker FAST พร้อมใช้งาน</div>
+    </div>
+    <button id="rb-export-log" style="margin-top:12px;width:100%;padding:8px;border:none;border-radius:6px;background:#444;color:white;cursor:pointer;font-size:14px;">Export Log</button>
+  `;
+  document.body.appendChild(logPanel);
+}
+
 console.log('🚀 RocketBooker Loading (FAST)…');
 
 /* ===== Speed profile ===== */
@@ -24,8 +45,8 @@ let BRANCHES = [];
 /* ===== Overlay UI ===== */
 const overlay = document.createElement('div');
 overlay.innerHTML = `
-<div id="rb-rocket" style="position:fixed;top:20px;right:20px;z-index:999999999;width:50px;height:50px;background:#667eea;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;color:white;font-size:20px;box-shadow:0 4px 20px rgba(0,0,0,0.3);">🚀</div>
-<div id="rb-panel" style="position:fixed;top:20px;right:80px;z-index:999999999;width:300px;background:#667eea;border-radius:12px;color:white;padding:20px;display:none;">
+<div id="rb-rocket" style="position:fixed;top:20px;left:20px;z-index:999999999;width:50px;height:50px;background:#667eea;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;color:white;font-size:20px;box-shadow:0 4px 20px rgba(0,0,0,0.3);">🚀</div>
+<div id="rb-panel" style="position:fixed;top:20px;left:80px;z-index:999999999;width:320px;background:#667eea;border-radius:12px;color:white;padding:20px;display:none;">
   <div style="display:flex;justify-content:space-between;margin-bottom:15px;">
     <span style="font-weight:bold;">🚀 RocketBooker FAST</span>
     <button id="rb-close" style="background:none;border:none;color:white;cursor:pointer;font-size:18px;">×</button>
@@ -40,6 +61,12 @@ overlay.innerHTML = `
   </div>
 
   <div id="rb-production-options" style="display:none;margin-bottom:15px;">
+    <div style="margin-bottom:10px;">
+      <label style="display:flex;align-items:center;font-size:12px;">
+        <input type="checkbox" id="rb-loop-mode" style="margin-right:8px;">
+        วนซ้ำ (Loop Mode)
+      </label>
+    </div>
     <div style="margin-bottom:10px;">
       <label style="display:flex;align-items:center;font-size:12px;">
         <input type="checkbox" id="rb-use-delay" style="margin-right:8px;">
@@ -81,12 +108,7 @@ overlay.innerHTML = `
 
   <button id="rb-start" style="width:100%;padding:12px;border:none;border-radius:6px;background:#28a745;color:white;cursor:pointer;font-weight:bold;font-size:14px;margin-bottom:10px;">เริ่มจอง FAST</button>
 
-  <div style="margin-bottom:10px;">
-    <label style="display:block;margin-bottom:5px;font-size:12px;font-weight:bold;">📋 Log:</label>
-    <div id="rb-log-content" style="background:rgba(0,0,0,0.5);border-radius:6px;padding:10px;max-height:150px;overflow-y:auto;font-family:monospace;font-size:11px;">
-      <div style="color:#87CEEB;">🚀 RocketBooker FAST พร้อมใช้งาน</div>
-    </div>
-  </div>
+
 </div>
 `;
 function ensureOverlay() {
@@ -143,14 +165,17 @@ function setOverlayStatusBadge() {
   const opts = getRBOpts();
   const manualRegister = (mode === 'production' && uiManual) || opts.manualRegister === true;
   const useDelay = (mode === 'production' && (document.getElementById('rb-use-delay')?.checked || false)) || opts.useDelay === true;
+  const loopMode = document.getElementById('rb-loop-mode')?.checked || false;
 
-  badge.textContent = `Mode: ${mode} | ManualRegister: ${manualRegister ? 'ON' : 'OFF'} | Delay: ${useDelay ? 'ON' : 'OFF'}`;
+  badge.textContent = `Mode: ${mode} | ManualRegister: ${manualRegister ? 'ON' : 'OFF'} | Delay: ${useDelay ? 'ON' : 'OFF'} | Loop: ${loopMode ? 'ON' : 'OFF'}`;
 }
 setOverlayStatusBadge();
 const useDelayCk = document.getElementById('rb-use-delay');
 const manualCk   = document.getElementById('rb-manual-register');
+const loopModeCk = document.getElementById('rb-loop-mode');
 useDelayCk?.addEventListener('change', setOverlayStatusBadge);
 manualCk?.addEventListener('change', setOverlayStatusBadge);
+loopModeCk?.addEventListener('change', setOverlayStatusBadge);
 // --- helper: map siteKey ให้ตรงกับฝั่ง background/worker
 function mapSiteKeyForWorker(raw) {
   const k = String(raw || '').toLowerCase();
@@ -460,6 +485,26 @@ function addLog(message, color = '#87CEEB') {
   entry.textContent = `[${time}] ${message}`;
   logContent.appendChild(entry);
   logContent.scrollTop = logContent.scrollHeight;
+  // เก็บ log ใน window เพื่อ export
+  if (!window._rbLogLines) window._rbLogLines = [];
+  window._rbLogLines.push(`[${time}] ${message}`);
+  // เพิ่ม event export log
+  setTimeout(() => {
+    const exportBtn = document.getElementById('rb-export-log');
+    if (exportBtn) {
+      exportBtn.onclick = function() {
+        const lines = window._rbLogLines || [];
+        const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'rocketbooker-log.txt';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+      };
+    }
+  }, 500);
 }
 
 /* ===== FAST helpers ===== */
@@ -836,23 +881,26 @@ async function waitRegisterReady({
     const textNode = await waitXPath("//*[normalize-space(text())='Register' or normalize-space(text())='ลงทะเบียน']", 15000);
     btn = resolveClickable(textNode);
   }
-  if (btn && !looksDisabled(btn)) return btn;
+  // เพิ่มเช็คสีพื้นหลังแบบ BotAutoQ
+  function isBotAutoQEnabled(el) {
+    if (!el) return false;
+    const cs = window.getComputedStyle(el);
+    // BotAutoQ: สีพื้นหลังไม่เทา + !disabled
+    const notGray = cs.backgroundColor !== 'rgb(222, 222, 222)';
+    return notGray && !el.disabled;
+  }
+  if (btn && isBotAutoQEnabled(btn)) return btn;
 
   // เฝ้าดูการเปลี่ยนแปลง + re-query กันโดน re-render
   return await new Promise((resolve, reject) => {
     const check = () => {
-      // ปุ่มอาจถูกแทนที่ทั้งโหนด → query ใหม่ทุกครั้ง
       const current = evalOne();
-      if (current && !looksDisabled(current)) { resolve(current); return true; }
+      if (current && isBotAutoQEnabled(current)) { resolve(current); return true; }
       if (performance.now() - t0 > timeoutMs) { reject(new Error('Timeout waiting Register active')); return true; }
       return false;
     };
-
-    // Observe ทั้ง document แทนการผูกกับโหนดเดียว (ป้องกันโดน replace)
     const mo = new MutationObserver(() => { check() && mo.disconnect(); });
     mo.observe(document.documentElement, { attributes: true, childList: true, subtree: true });
-
-    // Safety poll เผื่อหลุด observe
     const iv = setInterval(() => {
       if (check()) { clearInterval(iv); mo.disconnect(); }
     }, 80);
@@ -939,13 +987,32 @@ async function clickNext(){
   while (performance.now() - t0 < 15000) {
     el = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
     if (el && isVisible(el) && isEnabled(el)) break;
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise(resolve => setTimeout(resolve, 40)); // ลด interval ให้เร็วขึ้น
   }
   if (!el || !isEnabled(el)) throw new Error('Next button not enabled - branch may not be selected properly');
 
   await clickFast(el);
   addLog('✅ Next แล้ว', '#90EE90');
   await SHORT_DELAY();
+
+  // เรียก handleMinigame ทันทีหลัง Next
+  addLog('⚡ ตรวจหามินิเกมทันทีหลัง Next...','#FFD700');
+  await handleMinigame();
+
+  // เพิ่ม MutationObserver เพื่อสแกนหา React minigame ซ้ำ ๆ หลัง Next (ไวแบบ oldsource)
+  let minigameFired = false;
+  const observer = new MutationObserver(async () => {
+    if (minigameFired) return;
+    const found = await handleMinigame();
+    if (found) {
+      minigameFired = true;
+      addLog('⚡ Minigame ถูก trigger จาก observer!', '#FFD700');
+      observer.disconnect();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  // Safety: disconnect observer หลัง 5 วินาที
+  setTimeout(() => { observer.disconnect(); }, 5000);
 }
 const norm = (s)=>String(s||'').replace(/\s+/g,' ').trim().toLowerCase();
 function quickFindBranch(name){
@@ -1208,64 +1275,74 @@ async function startBooking() {
     const branch = document.getElementById('rb-branch')?.value;
     const day    = document.getElementById('rb-day')?.value;
     const time   = document.getElementById('rb-time')?.value;
+    const loopMode = document.getElementById('rb-loop-mode')?.checked || false;
 
     // ตรวจความครบ (แจ้งผู้ใช้ชัดเจน)
     if (!branch) { addLog('⚠️ ยังไม่ได้เลือกสาขา', '#FFB6C1'); throw new Error('NO_BRANCH'); }
     if (!day)    { addLog('⚠️ ยังไม่ได้เลือกวันที่', '#FFB6C1'); throw new Error('NO_DAY'); }
     if (!time)   { addLog('⚠️ ยังไม่ได้เลือกเวลา', '#FFB6C1'); throw new Error('NO_TIME'); }
 
-    addLog(`⚡ เริ่ม ULTRA FAST MODE… [${branch} | ${day} | ${time}]`);
-    checkStop();
+    let round = 0;
+    do {
+      round++;
+      addLog(`⚡ เริ่ม ULTRA FAST MODE… [${branch} | ${day} | ${time}] (รอบที่ ${round})`);
+      checkStop();
 
-    await runStep('หา/รอ Register พร้อมใช้งาน', async () => {
-      await clickRegister();
-    });
-
-    await runStep('ยืนยันว่าอยู่หน้าสาขา', async () => {
-      await ensureBranchPage(6);
-    });
-
-    await runStep(`เลือกสาขา: ${branch}`, async () => {
-      await selectBranch(branch);
-    });
-
-    await runStep('คลิก Next', async () => {
-      await clickNext();
-    });
-
-    await runStep('จัดการมินิเกม/แคปช่า (ถ้ามี)', async () => {
-      await handleMinigame();
-    });
-
-    await runStep(`เลือกวันที่: ${day}`, async () => {
-      await selectDate(day);
-    });
-
-    await runStep(`เลือกเวลา: ${time}`, async () => {
-      await selectTimeOrRound(time);
-    });
-
-    await runStep('ยืนยันวันเวลา', async () => {
-      await confirmDateTime();
-    });
-
-    await runStep('ติ๊กยอมรับเงื่อนไข', async () => {
-      await clickCheckbox();
-    });
-
-    await runStep('ยืนยันการจองสุดท้าย', async () => {
-      await confirmBookingFinal();
-    });
-
-    addLog('🎉 เสร็จเรียบร้อย!', '#90EE90');
-
-    // (ออปชัน) ยิง log ไป worker/D1 ผ่าน background
-    try {
-      chrome.runtime?.sendMessage?.({
-        action: 'postLog',
-        payload: { event: 'booking_done', level: 'info', message: 'success', meta: { branch, day, time } }
+      await runStep('หา/รอ Register พร้อมใช้งาน', async () => {
+        await clickRegister();
       });
-    } catch {}
+
+      await runStep('ยืนยันว่าอยู่หน้าสาขา', async () => {
+        await ensureBranchPage(6);
+      });
+
+      await runStep(`เลือกสาขา: ${branch}`, async () => {
+        await selectBranch(branch);
+      });
+
+      await runStep('คลิก Next', async () => {
+        await clickNext();
+      });
+
+      await runStep('จัดการมินิเกม/แคปช่า (ถ้ามี)', async () => {
+        await handleMinigame();
+      });
+
+      await runStep(`เลือกวันที่: ${day}`, async () => {
+        await selectDate(day);
+      });
+
+      await runStep(`เลือกเวลา: ${time}`, async () => {
+        await selectTimeOrRound(time);
+      });
+
+      await runStep('ยืนยันวันเวลา', async () => {
+        await confirmDateTime();
+      });
+
+      await runStep('ติ๊กยอมรับเงื่อนไข', async () => {
+        await clickCheckbox();
+      });
+
+      await runStep('ยืนยันการจองสุดท้าย', async () => {
+        await confirmBookingFinal();
+      });
+
+      addLog('🎉 เสร็จเรียบร้อย!', '#90EE90');
+
+      // ส่ง clearBadge ไป background เพื่อเคลียร์ badge
+      try {
+        chrome.runtime?.sendMessage?.({ action: 'clearBadge' });
+      } catch {}
+
+      // (ออปชัน) ยิง log ไป worker/D1 ผ่าน background
+      try {
+        chrome.runtime?.sendMessage?.({
+          action: 'postLog',
+          payload: { event: 'booking_done', level: 'info', message: 'success', meta: { branch, day, time } }
+        });
+      } catch {}
+    } while (loopMode && !window.isStopped);
   } catch (err) {
     if (err === stopError) {
       addLog('⏹️ หยุดตามคำสั่งผู้ใช้', '#FFB6C1');
