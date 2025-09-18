@@ -1,0 +1,764 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using Firebase.Database;
+using Microsoft.Playwright;
+using MyApp;
+using Newtonsoft.Json;
+
+private static async Task <Main>$(string[] args)
+{
+    _ = DateTime.Now;
+    Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+    Console.OutputEncoding = Encoding.GetEncoding(874);
+    string log = "Start Bot";
+    new Dictionary<string, object>();
+    Encoding.UTF8.GetBytes("Zwasabi".PadRight(16, '0'));
+    Encoding.UTF8.GetBytes("SimpleInitVector");
+    bool secondrun = false;
+    string text = "5.2";
+    log += newlog("เวอร\u0e4cช\u0e31\u0e48น " + text);
+    _ = DateTime.Now;
+    try
+    {
+        Dictionary<string, object> config;
+        try
+        {
+            string value = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Config.json")).Replace("\\", "/");
+            config = JsonConvert.DeserializeObject<Dictionary<string, object>>(value);
+            log += newlog("อ\u0e48านต\u0e31\u0e49งค\u0e48าเสร\u0e47จส\u0e34\u0e49น");
+        }
+        catch (Exception ex)
+        {
+            log += newlog(ex.Message);
+            Console.ReadLine();
+            return;
+        }
+        string[] Mandatory = new string[7] { "Day", "Round", "ConfirmCaptcha", "RandomCaptcha", "Branch", "Timer", "Delay" };
+        if (config.Count<KeyValuePair<string, object>>((KeyValuePair<string, object> x) => Mandatory.Contains(x.Key) && x.Value.ToString() == "") > 0)
+        {
+            log += newlog("ม\u0e35บางค\u0e48าไม\u0e48ได\u0e49ใส\u0e48ใน Config.json");
+            Console.ReadLine();
+            return;
+        }
+        new FirebaseClient("https://zedbot-c1a74-default-rtdb.asia-southeast1.firebasedatabase.app/");
+        string[] source = new string[202]
+        {
+            "8e8895246", "aey895246", "alove95246", "ampere95246", "anubis78901", "aofernand78901", "aoyry78901", "arm78901", "arraya78901", "atom95246",
+            "aun95246", "await95246", "awit95246", "bambyy78901", "bas95246", "basswong78901", "bbb95246", "beam95246", "beboom95246", "best78901",
+            "bestdot78901", "bestzil78901", "big789", "bkb78901", "book95246", "boriphon27139", "boss95246", "bosskub78901", "boyfufu78901", "bumu95246",
+            "bunyanunch95246", "canon78901", "captain95246", "chanida95246", "chichi95246", "clear78901", "cloud95246", "clt78901", "cokeglo78901", "d95246",
+            "dottee78901", "eark78901", "fai95246", "fern78901", "fluk78901", "forest69", "freud78901", "ftliker57211", "fuse95246", "gam78901",
+            "game11109", "giftza95246", "glo95246", "gmo95246", "gogo78901", "goldenpun95246", "goom78901", "gqson95246", "gunlazada95246", "gyb95246",
+            "hahipaple78901", "hj!78901", "hyde78901", "icecream95246", "iron15605", "jab95246", "jacks95246", "james95246", "janepink78901", "jaotana95246",
+            "jay95246", "jcher95246", "jejee95246", "jernjy95246", "jidapa95246", "jira78901", "joejoe95246", "jojo78901", "joker95246", "jrp95246",
+            "jsound95246", "jummy95246", "jumzjim95246", "kaem95246", "kan95246", "kanban78901", "kawuhu78901", "kent78901", "khaw95246", "khunpuii95246",
+            "kim78901", "kodbot888", "kodbot999", "kritsada95246", "kwan78901", "l78901", "looktaoz95246", "lpmt95246", "lqqson95246", "m78901",
+            "mameaw95246", "mana59173", "maprang78901", "marc95246", "mark78901", "mayd95246", "mcmcmc78901", "meanmean95246", "miggy78901", "mild95246",
+            "million95246", "minusn95246", "mo78901", "moo78901", "moomoo78901", "mossmoss95246", "mrezer95246", "muay78901", "musaka95246", "musaku95246",
+            "myn95246", "nack95246", "namhwan95246", "natee78901", "natthawat78901", "nawasit78901", "newojoe95246", "nine91044", "ning78901", "nmuscle95246",
+            "nnnn78901", "nongqueen95246", "noon95246", "notc78901", "note95246", "notplus95246", "nueng95246", "num78901", "nutnicha78901", "nutnut95246",
+            "ohm78901", "pancap95246", "pare95246", "parin22888", "parin78901", "pariwat95246", "patcat95246", "patcha78901", "pattraporn95246", "pcat95246",
+            "pdel78901", "peeranon95246", "peet06345", "peet95246", "plovebear95246", "pokz78901", "pond95246", "poppo78901", "pplove95246", "prajak95246",
+            "prim95246", "printkak", "pui95246", "pup95246", "rin78901", "rock95246", "run78901", "s83653", "sa78901", "saimai95246",
+            "skyraider95246", "smilerb19852", "sorakoji78901", "spy78901", "stamp78901", "taesoy95246", "tanayu95246", "teeone95246", "tenten95246", "testmac99999",
+            "thexf95246", "thichar95246", "tiger78901", "tiwtiw95246", "tk95246", "topz78901", "tow78901", "tttt78901", "tum278901", "tum36087",
+            "tum78901", "tumsmoke95246", "tun95246", "tungmay04902", "w95246", "wh95246", "wient95246", "woraton95246", "yai78901", "yimyim78901",
+            "yoky95246", "yongtee78901"
+        };
+        _ = AppDomain.CurrentDomain.BaseDirectory;
+        string text2 = config["License"].ToString();
+        if (text2 == "")
+        {
+            log += newlog("ย\u0e31งไม\u0e48ได\u0e49ใส\u0e48 License");
+            Console.ReadLine();
+            return;
+        }
+        _ = Environment.MachineName;
+        if (!source.Contains(text2))
+        {
+            log += newlog("ไม\u0e48พบ License");
+            Console.ReadLine();
+            return;
+        }
+        DateTime cutoff = new DateTime(2025, 9, 18);
+        using HttpClient http = new HttpClient();
+        string url = "https://worldtimeapi.org/api/timezone/Asia/Bangkok";
+        int o = 0;
+        while (true)
+        {
+            try
+            {
+                if (await GetBangkokDateFromGoogleAsync(http) > cutoff)
+                {
+                    log += newlog("โปรดรอเวอร\u0e4cช\u0e31\u0e48นใหม\u0e48จากท\u0e35มงาน");
+                    return;
+                }
+            }
+            catch (Exception)
+            {
+                goto IL_0d3a;
+            }
+            break;
+            IL_0d3a:
+            o++;
+            if (o <= 10)
+            {
+                continue;
+            }
+            do
+            {
+                try
+                {
+                    using JsonDocument jsonDocument = JsonDocument.Parse(await http.GetStringAsync(url));
+                    _ = DateTime.Parse(jsonDocument.RootElement.GetProperty("datetime").GetString()).Date;
+                }
+                catch (Exception ex3)
+                {
+                    log += newlog(ex3.Message);
+                }
+                Thread.Sleep(20);
+                o++;
+            }
+            while (o <= 100);
+            log += newlog("เช\u0e37\u0e48อมต\u0e48อระบบไม\u0e48ได\u0e49");
+            return;
+        }
+        log += newlog("เข\u0e49าส\u0e39\u0e48ระบบสำเร\u0e47จ");
+        int num = 9222;
+        num += Convert.ToInt32(config["Port"].ToString());
+        string text3 = $"C:\\Temp\\ChromeProfiles\\Profile_{num}";
+        string fileName = config["BrowserPath"].ToString();
+        Directory.CreateDirectory(text3);
+        string arguments = $"https://popmartth.rocket-booking.app/booking --remote-debugging-port={num} --user-data-dir=\"{text3}\" " + "--disable-popup-blocking --disable-extensions --disable-translate --disable-features=TranslateUI --no-first-run --no-default-browser-check --start-maximized";
+        Process process = Process.Start(new ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = arguments,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        });
+        EventHandler<IFrame> handler = null;
+        string jsonVersionUrl = $"http://localhost:{num}/json/version";
+        string wsDebuggerUrl = null;
+        HttpClient httpclient = new HttpClient();
+        for (int retry = 0; retry < 20; retry++)
+        {
+            try
+            {
+                Dictionary<string, object> dictionary = await httpclient.GetFromJsonAsync<Dictionary<string, object>>(jsonVersionUrl);
+                if (dictionary != null && dictionary.TryGetValue("webSocketDebuggerUrl", out var value2))
+                {
+                    wsDebuggerUrl = value2.ToString();
+                    break;
+                }
+            }
+            catch
+            {
+                await Task.Delay(500);
+            }
+        }
+        if (wsDebuggerUrl == null)
+        {
+            log += newlog("เช\u0e37\u0e48อมต\u0e48อ Browser ไม\u0e48สำเร\u0e47จ");
+            return;
+        }
+        await Task.Delay(6000);
+        log += newlog("เช\u0e37\u0e48อมต\u0e48อ Browser จอท\u0e35\u0e48 " + config["Port"].ToString());
+        IPlaywright playwright = await Playwright.CreateAsync();
+        IPage page;
+        while (true)
+        {
+            IBrowser browser = await playwright.Chromium.ConnectOverCDPAsync(wsDebuggerUrl);
+            IBrowserContext browserContext = browser.Contexts.FirstOrDefault();
+            if (browserContext == null)
+            {
+                browserContext = await browser.NewContextAsync();
+            }
+            IBrowserContext context = browserContext;
+            page = context.Pages[0];
+            log += newlog("Reconnect!");
+            if (!secondrun)
+            {
+                try
+                {
+                    await page.WaitForSelectorAsync("img.logo", new PageWaitForSelectorOptions
+                    {
+                        Timeout = 3000f
+                    });
+                }
+                catch (Exception)
+                {
+                    page.EvaluateAsync("() => {\r\n    setTimeout(() => {\r\n        window.location.reload();\r\n    }, 1000);\r\n}");
+                    await context.DisposeAsync();
+                    await Task.Delay(6000);
+                    continue;
+                }
+                try
+                {
+                    IElementHandle profile = await page.WaitForSelectorAsync("img[alt='Profile']", new PageWaitForSelectorOptions
+                    {
+                        State = WaitForSelectorState.Visible
+                    });
+                    if (await page.QuerySelectorAsync("input#firstname") != null)
+                    {
+                        await page.Locator("input#firstname").FillAsync(config["Firstname"].ToString());
+                        await Task.Delay(100);
+                        await page.Locator("input#lastname").FillAsync(config["Lastname"].ToString());
+                        await Task.Delay(100);
+                        await page.Locator("div.ant-select-selector").ClickAsync();
+                        await Task.Delay(500);
+                        await page.Locator("div.ant-select-selector").PressAsync("Enter");
+                        await Task.Delay(500);
+                        await page.Locator("input#ID").FillAsync(config["ID"].ToString());
+                        await Task.Delay(100);
+                        await page.Locator("input#tel").FillAsync(config["Phone"].ToString());
+                        await Task.Delay(100);
+                        await page.Locator("input[type='checkbox']").DispatchEventAsync("click");
+                        await Task.Delay(100);
+                        await page.GetByText("Next", new PageGetByTextOptions
+                        {
+                            Exact = true
+                        }).ClickAsync();
+                    }
+                    await Task.Delay(3000);
+                    await profile.DispatchEventAsync("click");
+                    await Task.Delay(2000);
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+                DateTime WaitTime = DateTime.Now;
+                while (true)
+                {
+                    if (await page.QuerySelectorAsync("div.fullname") == null)
+                    {
+                        try
+                        {
+                            if ((double)(decimal)(DateTime.Now - WaitTime).TotalSeconds > 4.0)
+                            {
+                                await page.EvaluateAsync("document.querySelector('img[alt='Profile']').click()");
+                                await Task.Delay(1000);
+                                WaitTime = DateTime.Now;
+                            }
+                            else if ((await page.EvaluateAsync("[...document.querySelectorAll('button')].find(btn => btn.innerText.trim() === \"Connect\")")).HasValue)
+                            {
+                                await Task.Delay(100);
+                                await page.EvaluateAsync("[...document.querySelectorAll('button')].find(btn => btn.innerText.trim() === \"Connect\").click()");
+                                await Task.Delay(200);
+                                break;
+                            }
+                        }
+                        catch (Exception)
+                        {
+                        }
+                        continue;
+                    }
+                    Thread.Sleep(2000);
+                    try
+                    {
+                        JsonElement? jsonElement = await page.EvaluateAsync("document.querySelector(\"div.fullname\").textContent");
+                        if (!jsonElement.HasValue || jsonElement.Value.ToString().Trim() == "")
+                        {
+                            await page.QuerySelectorAsync("img[alt='Booking']").Result.DispatchEventAsync("click");
+                            await Task.Delay(2000);
+                            await page.QuerySelectorAsync("img[alt='Profile']").Result.DispatchEventAsync("click");
+                            continue;
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        await page.QuerySelectorAsync("img[alt='Booking']").Result.DispatchEventAsync("click");
+                        await Task.Delay(2000);
+                        await page.QuerySelectorAsync("img[alt='Profile']").Result.DispatchEventAsync("click");
+                        continue;
+                    }
+                    goto IL_3816;
+                }
+                while (true)
+                {
+                    try
+                    {
+                        if ((await page.EvaluateAsync("[...document.querySelectorAll('button')].find(btn => btn.innerText.includes(\"Connect LINE\"))")).HasValue)
+                        {
+                            await Task.Delay(100);
+                            await page.EvaluateAsync("[...document.querySelectorAll('button')].find(btn => btn.innerText.includes(\"Connect LINE\")).click()");
+                            await Task.Delay(200);
+                        }
+                        IElementHandle profile = await page.QuerySelectorAsync("input[placeholder*='Email'] , input[placeholder*='อ\u0e35เมล']");
+                        if (await page.QuerySelectorAsync("div.login-with-different-account") != null)
+                        {
+                            await Task.Delay(200);
+                            await page.EvaluateAsync("document.querySelector(\"div.login-with-different-account > a\").click()");
+                            await Task.Delay(800);
+                        }
+                        if (profile != null)
+                        {
+                            ILocator locator = page.Locator("input[placeholder*='Email'] , input[placeholder*='อ\u0e35เมล']");
+                            if (profile != null)
+                            {
+                                await locator.FillAsync(config["Email"].ToString());
+                                await page.QuerySelectorAsync("input[placeholder*='Password'] , input[placeholder*='รห\u0e31ส']").Result.FillAsync(config["Password"].ToString());
+                                await Task.Delay(200);
+                            }
+                            await page.Locator("button[type='submit']").DispatchEventAsync("click");
+                            await page.Locator("button[type='submit']").WaitForAsync(new LocatorWaitForOptions
+                            {
+                                Timeout = 30000f,
+                                State = WaitForSelectorState.Detached
+                            });
+                            await Task.Delay(100);
+                            while (true)
+                            {
+                                try
+                                {
+                                    if (await page.QuerySelectorAsync("form") == null)
+                                    {
+                                        break;
+                                    }
+                                }
+                                catch (Exception)
+                                {
+                                }
+                            }
+                            await context.DisposeAsync();
+                            await Task.Delay(8000);
+                            break;
+                        }
+                        if (await page.QuerySelectorAsync("input#firstname") == null)
+                        {
+                            continue;
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        continue;
+                    }
+                    goto IL_2d45;
+                }
+                continue;
+            }
+            await page.EvaluateAsync("window.location.href = \"https://popmartth.rocket-booking.app/booking\"");
+            await Task.Delay(1000);
+            while (true)
+            {
+                try
+                {
+                    if (await page.QuerySelectorAsync("div.register") != null)
+                    {
+                        page.FrameNavigated += handler;
+                        break;
+                    }
+                    await Task.Delay(150);
+                }
+                catch (Exception)
+                {
+                }
+            }
+            goto IL_39c0;
+            IL_2d45:
+            await page.Locator("input#firstname").FillAsync(config["Firstname"].ToString());
+            await Task.Delay(100);
+            await page.Locator("input#lastname").FillAsync(config["Lastname"].ToString());
+            await Task.Delay(100);
+            await page.Locator("div.ant-select-selector").ClickAsync();
+            await Task.Delay(500);
+            await page.Locator("div.ant-select-selector").PressAsync("Enter");
+            await Task.Delay(500);
+            await page.Locator("input#ID").FillAsync(config["ID"].ToString());
+            await Task.Delay(100);
+            await page.Locator("input#tel").FillAsync(config["Phone"].ToString());
+            await Task.Delay(100);
+            await page.Locator("input[type='checkbox']").DispatchEventAsync("click");
+            await Task.Delay(100);
+            await page.GetByText("Next", new PageGetByTextOptions
+            {
+                Exact = true
+            }).ClickAsync();
+            await Task.Delay(2000);
+            goto IL_3880;
+            IL_3880:
+            log += newlog("รอ Event เร\u0e34\u0e48ม!");
+            handler = async delegate(object? _, IFrame frame)
+            {
+                if (frame == page.MainFrame)
+                {
+                    await Task.Delay(100);
+                    try
+                    {
+                        await page.EvaluateAsync("() => {\r\n    function solveCaptcha() {\r\n        const arr = [2497, 2468, 2497, 2408, 2025, 2552, 2604];\r\n        const key = btoa(\r\n            Array.from(String.fromCharCode(...arr.map(x => (x - 17 + 104729) * 10127 % 104729)))\r\n                .map(x => x.charCodeAt(0))\r\n                .map(x => (31 * x + 17) % 104729)\r\n                .join(',')\r\n        )\r\n        .replace(/\\+/g, '-')\r\n        .replace(/\\//g, '_')\r\n        .replace(/=/g, '');\r\n\r\n        const payload = {\r\n            ts: Math.floor(Date.now() / 1000),\r\n            d: 1,\r\n            acc: 100,\r\n            t: Math.round((3 + Math.random() * 2) * 1000),\r\n            mv: 10 + Math.floor(Math.random() * 5),\r\n            re: 5 + Math.floor(Math.random() * 3),\r\n            key: key\r\n        };\r\n        const ticket = btoa(JSON.stringify(payload)).substring(0, 256);\r\n\r\n        const container = document.querySelector('.sc-623bb80d-0');\r\n        if (!container) return;\r\n\r\n        const fiberKey = Object.keys(container).find(k => k.startsWith('__reactFiber$'));\r\n        if (!fiberKey) return;\r\n\r\n        try {\r\n            const fiberNode = container[fiberKey].return.return;\r\n            if (!fiberNode || !fiberNode.memoizedProps) return;\r\n\r\n            const cb = fiberNode.memoizedProps.onSuccess;\r\n            if (typeof cb === 'function') {\r\n                cb(ticket);\r\n            }\r\n        } catch {}\r\n    }\r\n\r\n    solveCaptcha();\r\n}");
+                    }
+                    catch (Exception)
+                    {
+                    }
+                    try
+                    {
+                        await page.EvaluateAsync("() => {\r\n            Math.random = () => 0.8;\r\n        }");
+                        return;
+                    }
+                    catch (Exception)
+                    {
+                        return;
+                    }
+                }
+                await Task.Delay(100);
+                try
+                {
+                    await page.EvaluateAsync("() => {\r\n    function solveCaptcha() {\r\n        const arr = [2497, 2468, 2497, 2408, 2025, 2552, 2604];\r\n        const key = btoa(\r\n            Array.from(String.fromCharCode(...arr.map(x => (x - 17 + 104729) * 10127 % 104729)))\r\n                .map(x => x.charCodeAt(0))\r\n                .map(x => (31 * x + 17) % 104729)\r\n                .join(',')\r\n        )\r\n        .replace(/\\+/g, '-')\r\n        .replace(/\\//g, '_')\r\n        .replace(/=/g, '');\r\n\r\n        const payload = {\r\n            ts: Math.floor(Date.now() / 1000),\r\n            d: 1,\r\n            acc: 100,\r\n            t: Math.round((3 + Math.random() * 2) * 1000),\r\n            mv: 10 + Math.floor(Math.random() * 5),\r\n            re: 5 + Math.floor(Math.random() * 3),\r\n            key: key\r\n        };\r\n        const ticket = btoa(JSON.stringify(payload)).substring(0, 256);\r\n\r\n        const container = document.querySelector('.sc-623bb80d-0');\r\n        if (!container) return;\r\n\r\n        const fiberKey = Object.keys(container).find(k => k.startsWith('__reactFiber$'));\r\n        if (!fiberKey) return;\r\n\r\n        try {\r\n            const fiberNode = container[fiberKey].return.return;\r\n            if (!fiberNode || !fiberNode.memoizedProps) return;\r\n\r\n            const cb = fiberNode.memoizedProps.onSuccess;\r\n            if (typeof cb === 'function') {\r\n                cb(ticket);\r\n            }\r\n        } catch {}\r\n    }\r\n\r\n    solveCaptcha();\r\n}");
+                }
+                catch (Exception)
+                {
+                }
+                try
+                {
+                    await page.EvaluateAsync("() => {\r\n            Math.random = () => 0.8;\r\n        }");
+                }
+                catch (Exception)
+                {
+                }
+            };
+            page.FrameNavigated += handler;
+            _ = DateTime.Now;
+            while (true)
+            {
+                try
+                {
+                    if (await page.QuerySelectorAsync("div.register") == null)
+                    {
+                        await Task.Delay(10000);
+                        continue;
+                    }
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+                break;
+            }
+            goto IL_39c0;
+            IL_3816:
+            await page.QuerySelectorAsync("img[alt='Booking']").Result.DispatchEventAsync("click");
+            await Task.Delay(2000);
+            goto IL_3880;
+            IL_39c0:
+            while (true)
+            {
+                try
+                {
+                    IElementHandle elementHandle = await page.QuerySelectorAsync("div.register");
+                    if (elementHandle != null && !(await elementHandle.GetAttributeAsync("style")).Replace(" ", "").Contains("222,222"))
+                    {
+                        break;
+                    }
+                }
+                catch (Exception)
+                {
+                }
+            }
+            await Task.Delay(50);
+            _ = DateTime.Now;
+            DateTime FirstClickTime;
+            while (true)
+            {
+                IL_3b39:
+                try
+                {
+                    await page.EvaluateAsync("document.querySelector(\"div.register\").click()");
+                    await Task.Delay(30);
+                }
+                catch (Exception)
+                {
+                }
+                log += newlog("กดป\u0e38\u0e48ม Register");
+                FirstClickTime = DateTime.Now;
+                DateTime WaitTime = DateTime.Now;
+                while (true)
+                {
+                    try
+                    {
+                        if ((double)(decimal)(DateTime.Now - WaitTime).TotalSeconds > Convert.ToDouble(config["Timer"]))
+                        {
+                            await page.EvaluateAsync("document.querySelectorAll(\"span[role='img'][aria-label='close']\").forEach(x=>x.click())");
+                            await Task.Delay(150);
+                            WaitTime = DateTime.Now;
+                            goto IL_3b39;
+                        }
+                        JsonElement? jsonElement2 = await page.EvaluateAsync("document.querySelectorAll(\"div.branch-item:not([class*='full'])\").length");
+                        if (jsonElement2.Value.ToString() == "0")
+                        {
+                            continue;
+                        }
+                        if (jsonElement2.Value.ToString() == "1")
+                        {
+                            await Task.Delay((int)Convert.ToDouble(config["Delay"].ToString()) * 500);
+                            await page.EvaluateAsync("document.querySelectorAll(\"div.branch-item:not([class*='full'])\")[0].click()");
+                        }
+                        else
+                        {
+                            await Task.Delay((int)Convert.ToDouble(config["Delay"].ToString()) * 500);
+                            await page.GetByText(new Regex(config["Branch"].ToString())).DispatchEventAsync("click");
+                        }
+                        break;
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+                break;
+            }
+            log += newlog("เล\u0e37อกสาขา");
+            await Task.Delay(10);
+            await Task.Delay((int)Convert.ToDouble(config["Delay"].ToString()) * 1000);
+            try
+            {
+                await page.EvaluateAsync("document.querySelector(\"div.btn-section > button.next-btn\").click()");
+            }
+            catch (Exception)
+            {
+            }
+            log += newlog("เล\u0e37อกสาขาสำเร\u0e47จ");
+            await Task.Delay(300);
+            _ = DateTime.Now;
+            while (true)
+            {
+                try
+                {
+                    IElementHandle date = await page.QuerySelectorAsync("div[class*='MuiDayCalendar-week'] > button:not([class*=\"disabled\"])");
+                    if (await page.QuerySelectorAsync("canvas") != null)
+                    {
+                        log += newlog("เจอ Catpcha");
+                        await Task.Delay(50);
+                        date = await page.QuerySelectorAsync("div[class*='MuiDayCalendar-week'] > button:not([class*=\"disabled\"])");
+                        if (date == null)
+                        {
+                            try
+                            {
+                                while (true)
+                                {
+                                    try
+                                    {
+                                        if ((await page.EvaluateAsync("document.querySelector(\"button[class*='ant-btn'\")")).HasValue)
+                                        {
+                                            await Task.Delay(100);
+                                            await page.EvaluateAsync("document.querySelector(\"button[class*='ant-btn'\").click()");
+                                            break;
+                                        }
+                                    }
+                                    catch (Exception)
+                                    {
+                                    }
+                                    try
+                                    {
+                                        date = await page.QuerySelectorAsync("div[class*='MuiDayCalendar-week'] > button:not([class*=\"disabled\"])");
+                                        if (date != null)
+                                        {
+                                            goto IL_49b9;
+                                        }
+                                    }
+                                    catch (Exception)
+                                    {
+                                    }
+                                }
+                            }
+                            catch (Exception)
+                            {
+                            }
+                            await Task.Delay(1800);
+                            try
+                            {
+                                IElementHandle profile = await page.QuerySelectorAsync("canvas");
+                                if (profile != null)
+                                {
+                                    int retry = -4;
+                                    int dy = -25;
+                                    await Task.Delay(500);
+                                    await profile.EvaluateAsync("(el, args) => new Promise(resolve => { \r\n  const { dx, dy } = args;\r\n\r\n  const rect = el.getBoundingClientRect();\r\n  const cx = rect.left + rect.width / 2;\r\n  const cy = rect.top  + rect.height / 2;\r\n\r\n  const id = 1;\r\n  function fire(type, x, y, extra={}) {\r\n    const ev = new PointerEvent(type, Object.assign({\r\n      pointerId: id,\r\n      pointerType: 'mouse',\r\n      clientX: x, clientY: y,\r\n      buttons: (type === 'pointerup') ? 0 : 1,\r\n      bubbles: true, cancelable: true\r\n    }, extra));\r\n    el.dispatchEvent(ev);\r\n  }\r\n\r\n  el.focus?.();\r\n\r\n  fire('pointerenter', cx, cy);\r\n  fire('pointermove',  cx, cy);\r\n  fire('pointerdown',  cx, cy);\r\n\r\n  fire('pointermove', cx + dx, cy + dy);\r\n  fire('pointerup',   cx + dx, cy + dy);\r\n\r\n  resolve(true);\r\n})", new
+                                    {
+                                        dx = retry,
+                                        dy = dy
+                                    });
+                                }
+                            }
+                            catch (Exception)
+                            {
+                            }
+                            while (true)
+                            {
+                                try
+                                {
+                                    if (await page.QuerySelectorAsync("canvas") != null)
+                                    {
+                                        date = await page.QuerySelectorAsync("div[class*='MuiDayCalendar-week'] > button:not([class*=\"disabled\"])");
+                                        if (date == null)
+                                        {
+                                            continue;
+                                        }
+                                    }
+                                }
+                                catch (Exception)
+                                {
+                                    continue;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    goto IL_49b9;
+                    IL_49b9:
+                    if (date == null)
+                    {
+                        continue;
+                    }
+                    log += newlog("เจอว\u0e31นท\u0e35\u0e48");
+                    try
+                    {
+                        IReadOnlyList<IElementHandle> readOnlyList = await page.QuerySelectorAllAsync("div[class*='MuiDayCalendar-week'] > button:not([class*=\"disabled\"])");
+                        if (Convert.ToInt32(config["Day"].ToString()) > readOnlyList.Count)
+                        {
+                            await date.DispatchEventAsync("click");
+                        }
+                        else
+                        {
+                            await readOnlyList[Convert.ToInt32(config["Day"].ToString()) - 1].DispatchEventAsync("click");
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        await page.QuerySelectorAsync("div[class*='MuiDayCalendar-week'] > button:not([class*=\"disabled\"])").Result.DispatchEventAsync("click");
+                    }
+                    break;
+                }
+                catch (Exception)
+                {
+                }
+            }
+            log += newlog("เล\u0e37อกว\u0e31นท\u0e35\u0e48");
+            while (true)
+            {
+                try
+                {
+                    IReadOnlyList<IElementHandle> times = await page.QuerySelectorAllAsync("div.times.paddingBottom > button:not([class*=\"disabledTime\"])");
+                    IReadOnlyList<IElementHandle> readOnlyList2 = await page.QuerySelectorAllAsync("div.times.paddingBottom > button[class*=\"disabledTime\"]");
+                    if (times.Count <= 0)
+                    {
+                        continue;
+                    }
+                    try
+                    {
+                        if (Convert.ToInt32(config["Round"]) <= times.Count)
+                        {
+                            await times[Convert.ToInt32(config["Round"]) - 1 - readOnlyList2.Count].DispatchEventAsync("click");
+                        }
+                        else
+                        {
+                            await times[0].DispatchEventAsync("click");
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        await times[0].DispatchEventAsync("click");
+                    }
+                    break;
+                }
+                catch (Exception)
+                {
+                }
+            }
+            log += newlog("เล\u0e37อกเวลา");
+            try
+            {
+                page.EvaluateAsync("() => {\r\n    setTimeout(() => {\r\n        const interval = setInterval(() => {\r\n            const container = document.querySelector('div.wholePage.datePicker');\r\n            if (!container) return;\r\n\r\n            const buttons = Array.from(container.querySelectorAll('button'))\r\n                .filter(b => b.textContent.trim().includes('Confirm'));\r\n\r\n            buttons.forEach(btn => {\r\n                btn.click();\r\n                console.log('⚡ Clicked Confirm1 button:', btn.textContent.trim());\r\n            });\r\n        }, 50);\r\n\r\n        setTimeout(() => {\r\n            clearInterval(interval);\r\n        }, 2000);\r\n    }, 180);\r\n}");
+            }
+            catch (Exception)
+            {
+            }
+            await Task.Delay(10);
+            try
+            {
+                page.EvaluateAsync("() => {\r\n    const interval = setInterval(() => {\r\n        const label = document.querySelector('div.info-con > div > label');\r\n        if (!label) return;\r\n\r\n        const input = label.control || document.querySelector(`#${label.htmlFor}`);\r\n\r\n        if (input && input.checked) {\r\n            clearInterval(interval);  // \ud83d\uded1 Loop ends here\r\n        } else {\r\n            label.click();\r\n        }\r\n    }, 300);\r\n}");
+            }
+            catch (Exception)
+            {
+            }
+            await Task.Delay(10);
+            double num2 = 100.0;
+            try
+            {
+                num2 = 10450.0 - (DateTime.Now - FirstClickTime).TotalMilliseconds;
+                if (num2 < 100.0)
+                {
+                    num2 = 100.0;
+                }
+            }
+            catch (Exception)
+            {
+            }
+            try
+            {
+                page.EvaluateAsync("(delay) => {\r\n    setTimeout(() => {\r\n        const interval = setInterval(() => {\r\n            const container2 = document.querySelector('div.InfoPage');\r\n            if (!container2) return;\r\n            const buttons2 = Array.from(container2.querySelectorAll('button'))\r\n                .filter(b => b.textContent.trim().includes('Confirm'));\r\n            buttons2.forEach(btn => {\r\n                btn.click();\r\n            });\r\n        }, 120);\r\n        setTimeout(() => {\r\n            clearInterval(interval);\r\n        }, 9000);\r\n    }, delay);\r\n}", num2);
+            }
+            catch (Exception)
+            {
+            }
+            await context.DisposeAsync();
+            log += newlog("บอททำงานจบแล\u0e49ว!");
+            _ = DateTime.Now;
+            Thread.Sleep(1200);
+            page.FrameNavigated -= handler;
+            try
+            {
+                DialogResult dialogResult = DialogResult.No;
+                if (process?.MainWindowHandle != IntPtr.Zero && NativeMethods.GetWindowRect(process.MainWindowHandle, out var _))
+                {
+                    dialogResult = DialogHelper.ShowForProcess(process, "จอท\u0e35\u0e48 " + config["Port"].ToString(), "เล\u0e37อกอ\u0e35กรอบ");
+                }
+                if (dialogResult == DialogResult.Yes)
+                {
+                    secondrun = true;
+                    log += newlog("รอเล\u0e37อกใหม\u0e48");
+                    continue;
+                }
+            }
+            catch (Exception)
+            {
+            }
+            break;
+        }
+        Console.ReadLine();
+    }
+    catch (Exception ex30)
+    {
+        _ = log + newlog(ex30.Message);
+        Console.Read();
+    }
+    static async Task<DateTime> GetBangkokDateFromGoogleAsync(HttpClient httpClient)
+    {
+        DateTimeOffset dateTimeOffset = (await GrabAsync(HttpMethod.Head)) ?? (await GrabAsync(HttpMethod.Get)) ?? throw new Exception("Google response has no Date header");
+        DateTimeOffset dateTimeOffset2 = dateTimeOffset;
+        TimeZoneInfo destinationTimeZone = TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "SE Asia Standard Time" : "Asia/Bangkok");
+        return TimeZoneInfo.ConvertTime(dateTimeOffset2.UtcDateTime, destinationTimeZone).Date;
+        async Task<DateTimeOffset?> GrabAsync(HttpMethod method)
+        {
+            using HttpRequestMessage req = new HttpRequestMessage(method, "https://www.google.com/generate_204");
+            using HttpResponseMessage httpResponseMessage = await httpClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+            return httpResponseMessage.Headers.Date;
+        }
+    }
+    static string newlog(string nlog)
+    {
+        Console.WriteLine(Environment.NewLine + DateTime.Now.ToString("dd/MM/yyyy HH:mm:ss.fff", CultureInfo.InvariantCulture) + " | " + nlog);
+        return Environment.NewLine + DateTime.Now.ToString("dd/MM/yyyy HH:mm:ss.fff", CultureInfo.InvariantCulture) + " | " + nlog + "\\n";
+    }
+}

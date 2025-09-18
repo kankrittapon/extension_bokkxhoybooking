@@ -1,0 +1,1 @@
+ลองปรับให้ส่ง ticket ที่มี key และทำ override randomness ชั่วขณะก่อนยิง onSuccess จะได้ผลลัพธ์ใกล้หรือเหนือกว่า data.txt ได้ไหม

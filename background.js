@@ -192,9 +192,11 @@ class BackgroundService {
   async handleMessage(message, sender, sendResponse) {
     try {
       switch (message.action) {
-        case "updateStatus":
+        case "updateStatus": {
           this.broadcastStatus(message);
+          try { sendResponse({ ok: true }); } catch {}
           break;
+        }
 
         case "getBookingStatus": {
           const status = await this.getGlobalBookingStatus();
@@ -206,6 +208,7 @@ class BackgroundService {
           console.log(`[${sender.tab?.id}] ${message.message}`);
           // optional: ส่งไป D1 ด้วย
           postLog({ event: "console", level: "info", message: message.message, meta: { tabId: sender.tab?.id } });
+          try { sendResponse({ ok: true }); } catch {}
           break;
         }
 
@@ -213,14 +216,14 @@ class BackgroundService {
         case "getBranches": {
           const site = message.site || "rocketbooking";
           const list = await getBranchesForSite(site);
-          sendResponse({ branches: list });
+          sendResponse({ ok: true, branches: list });
           break;
         }
 
         // ====== NEW: serve config from Worker/cache ======
         case "getConfig": {
           const cfg = await getConfig();
-          sendResponse({ config: cfg });
+          sendResponse({ ok: true, config: cfg });
           break;
         }
 
@@ -231,8 +234,17 @@ class BackgroundService {
           break;
         }
 
-        default:
+        case "clearBadge": {
+          try { chrome.action.setBadgeText({ text: "" }); } catch (e) { console.warn("clearBadge failed:", e); }
+          try { sendResponse({ ok: true }); } catch {}
+          break;
+        }
+
+        default: {
           console.log("Unknown message action:", message.action);
+          try { sendResponse({ ok: false, error: "Unknown message action" }); } catch {}
+          break;
+        }
       }
     } catch (e) {
       console.error("Background message handler error:", e);
