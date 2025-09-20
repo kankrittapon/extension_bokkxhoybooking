@@ -11,13 +11,43 @@ if (!document.getElementById('rb-log-panel')) {
     max-height:80vh;overflow-y:auto;display:block;
   `;
   logPanel.innerHTML = `
-    <div style="font-weight:bold;font-size:15px;margin-bottom:10px;">📋 Log</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <span style="font-weight:bold;font-size:15px;">📋 Log</span>
+      <button id="rb-log-toggle" type="button" style="background:#444;border:none;color:white;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:12px;">ซ่อน</button>
+    </div>
     <div id="rb-log-content" style="background:rgba(0,0,0,0.5);border-radius:6px;padding:10px;max-height:60vh;overflow-y:auto;font-size:13px;text-align:left;">
       <div style="color:#87CEEB;">🚀 RocketBooker FAST พร้อมใช้งาน</div>
     </div>
     <button id="rb-export-log" style="margin-top:12px;width:100%;padding:8px;border:none;border-radius:6px;background:#444;color:white;cursor:pointer;font-size:14px;">Export Log</button>
   `;
   document.body.appendChild(logPanel);
+
+  try {
+    const logToggleBtn = document.getElementById('rb-log-toggle');
+    const logContent = document.getElementById('rb-log-content');
+    const exportBtn = document.getElementById('rb-export-log');
+    let rbLogCollapsed = false;
+
+    const updateLogVisibility = () => {
+      if (!logContent || !exportBtn || !logToggleBtn) return;
+      logContent.style.display = rbLogCollapsed ? 'none' : 'block';
+      exportBtn.style.display = rbLogCollapsed ? 'none' : 'block';
+      logToggleBtn.textContent = rbLogCollapsed ? 'แสดง' : 'ซ่อน';
+      logToggleBtn.setAttribute('aria-expanded', String(!rbLogCollapsed));
+      logPanel.style.maxHeight = rbLogCollapsed ? 'auto' : '80vh';
+    };
+
+    if (logToggleBtn) {
+      logToggleBtn.addEventListener('click', () => {
+        rbLogCollapsed = !rbLogCollapsed;
+        updateLogVisibility();
+      });
+    }
+
+    updateLogVisibility();
+  } catch (error) {
+    try { console.warn('log toggle init failed', error); } catch (warnErr) {}
+  }
 }
 
 console.log('🚀 RocketBooker Loading (FAST)…');
@@ -193,8 +223,8 @@ function initAuthGate() {
 // ---------- Overlay UI ----------
 const overlay = document.createElement('div');
 overlay.innerHTML = `
-<div id="rb-rocket" style="position:fixed;top:20px;left:20px;z-index:999999999;width:50px;height:50px;background:#667eea;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;color:white;font-size:20px;box-shadow:0 4px 20px rgba(0,0,0,0.3);">🚀</div>
-<div id="rb-panel" style="position:fixed;top:20px;left:80px;z-index:999999999;width:320px;background:#667eea;border-radius:12px;color:white;padding:20px;display:none;">
+<div id="rb-rocket" style="position:fixed;top:20px;left:20px;z-index:999999999;width:50px;height:50px;background:#667eea;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;color:white;font-size:20px;box-shadow:0 4px 20px rgba(0,0,0,0.3);touch-action:none;">🚀</div>
+<div id="rb-panel" style="position:fixed;top:20px;left:80px;z-index:999999999;width:320px;max-height:80vh;overflow-y:auto;background:#667eea;border-radius:12px;color:white;padding:20px;display:none;">
   <div style="display:flex;justify-content:space-between;margin-bottom:15px;">
     <span style="font-weight:bold;">🚀 RocketBooker FAST</span>
     <button id="rb-close" style="background:none;border:none;color:white;cursor:pointer;font-size:18px;">×</button>
@@ -1320,9 +1350,132 @@ setTimeout(function() {
   const modeSelect = document.getElementById('rb-mode');
   const siteSelect = document.getElementById('rb-site');
 
-  rocket?.addEventListener('click', function() {
+  let rocketDragOffsetX = 0;
+  let rocketDragOffsetY = 0;
+  let rocketDragging = false;
+  let rocketDragged = false;
+  const rocketElement = rocket;
+
+  function repositionPanelNearRocket() {
+    if (!rocketElement || !panel || panel.style.display === 'none') return;
+    const panelWidth = panel.offsetWidth;
+    const panelHeight = panel.offsetHeight;
+    const rocketRect = rocketElement.getBoundingClientRect();
+    let left = rocketRect.right + 20;
+    if (left + panelWidth + 10 > window.innerWidth) {
+      left = rocketRect.left - panelWidth - 20;
+    }
+    if (left < 10) {
+      left = Math.max(10, window.innerWidth - panelWidth - 10);
+    }
+    let top = rocketRect.top;
+    if (top + panelHeight + 10 > window.innerHeight) {
+      top = window.innerHeight - panelHeight - 10;
+    }
+    if (top < 10) top = 10;
+    panel.style.left = `${left}px`;
+    panel.style.top = `${top}px`;
+  }
+
+  function setRocketPosition(x, y) {
+    if (!rocketElement) return;
+    const maxX = window.innerWidth - rocketElement.offsetWidth - 10;
+    const maxY = window.innerHeight - rocketElement.offsetHeight - 10;
+    const clampedX = Math.max(10, Math.min(x, maxX));
+    const clampedY = Math.max(10, Math.min(y, maxY));
+    rocketElement.style.left = `${clampedX}px`;
+    rocketElement.style.top = `${clampedY}px`;
+    repositionPanelNearRocket();
+  }
+
+  const handleRocketKeydown = (event) => {
+    if (!rocketElement) return;
+    const step = event.shiftKey ? 25 : 10;
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setRocketPosition(rocketElement.offsetLeft, rocketElement.offsetTop - step);
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setRocketPosition(rocketElement.offsetLeft, rocketElement.offsetTop + step);
+    } else if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      setRocketPosition(rocketElement.offsetLeft - step, rocketElement.offsetTop);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      setRocketPosition(rocketElement.offsetLeft + step, rocketElement.offsetTop);
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      rocketElement.click();
+    }
+  };
+
+  const handleRocketPointerDown = (event) => {
+    if (!rocketElement) return;
+    rocketDragging = true;
+    rocketDragged = false;
+    event.preventDefault();
+    rocketElement.setPointerCapture(event.pointerId);
+    rocketDragOffsetX = event.clientX - rocketElement.offsetLeft;
+    rocketDragOffsetY = event.clientY - rocketElement.offsetTop;
+  };
+
+  const handleRocketPointerMove = (event) => {
+    if (!rocketDragging || !rocketElement) return;
+    event.preventDefault();
+    const prevLeft = rocketElement.offsetLeft;
+    const prevTop = rocketElement.offsetTop;
+    const newX = event.clientX - rocketDragOffsetX;
+    const newY = event.clientY - rocketDragOffsetY;
+    if (!rocketDragged && (Math.abs(newX - prevLeft) > 2 || Math.abs(newY - prevTop) > 2)) {
+      rocketDragged = true;
+    }
+    setRocketPosition(newX, newY);
+  };
+
+  const handleRocketPointerUp = (event) => {
+    if (!rocketDragging || !rocketElement) return;
+    rocketDragging = false;
+    rocketElement.releasePointerCapture(event.pointerId);
+    setTimeout(() => { rocketDragged = false; }, 0);
+  };
+
+  const handleRocketPointerCancel = () => {
+    rocketDragging = false;
+    rocketDragged = false;
+  };
+
+  rocketElement?.setAttribute('tabindex', '0');
+  rocketElement?.setAttribute('role', 'button');
+  rocketElement?.setAttribute('aria-label', 'RocketBooker Overlay');
+
+  rocketElement?.addEventListener('pointerdown', handleRocketPointerDown);
+  rocketElement?.addEventListener('pointermove', handleRocketPointerMove);
+  rocketElement?.addEventListener('pointerup', handleRocketPointerUp);
+  rocketElement?.addEventListener('pointercancel', handleRocketPointerCancel);
+  rocketElement?.addEventListener('keydown', handleRocketKeydown);
+
+  window.addEventListener('resize', () => {
+    if (rocketElement) {
+      setRocketPosition(rocketElement.offsetLeft, rocketElement.offsetTop);
+    }
+    repositionPanelNearRocket();
+  });
+
+  if (rocketElement) {
+    setRocketPosition(rocketElement.offsetLeft || 20, rocketElement.offsetTop || 20);
+  }
+
+  rocket?.addEventListener('click', function(event) {
+    if (rocketDragged) {
+      rocketDragged = false;
+      return;
+    }
     if (panel.style.display === 'none' || !panel.style.display) {
       panel.style.display = 'block';
+      panel.style.visibility = 'hidden';
+      panel.scrollTop = 0;
+      repositionPanelNearRocket();
+      panel.style.visibility = '';
       checkStatus();
       setOverlayStatusBadge();
       refreshBranchesIntoOverlay({ preserveSelection: true, force: false });
