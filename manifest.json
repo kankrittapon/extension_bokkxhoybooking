@@ -1,7 +1,7 @@
 ﻿{
     "manifest_version":  3,
     "name":  "BokkChoYxBooking",
-    "version":  "1.0.3",
+    "version":  "1.0.4",
     "description":  "`NK\u0027Krittapon Madsen ระบบทดลองจอง POPMART",
     "permissions":  [
                         "activeTab",
