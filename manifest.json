@@ -1,59 +1,56 @@
-{
-  "manifest_version": 3,
-  "name": "BokkChoYxBooking",
-  "version": "1.0.2",
-  "description": "`NK'Krittapon Madsen ระบบทดลองจอง POPMART",
-
-  "permissions": [
-    "activeTab",
-    "storage",
-    "scripting",
-    "tabs"
-  ],
-
-  "host_permissions": [
-    "https://popmartth.rocket-booking.app/*",
-    "https://pmrocketbotautoq.web.app/*",
-    "https://botautoq.web.app/*",
-    "https://popmart.ithitec.com/*",
-    "https://access.line.me/*",
-    "https://branch-api.kan-krittapon.workers.dev/*"
-  ],
-
-  "action": {
-    "default_popup": "popup.html",
-    "default_title": "BokkChoYxBooking",
-    "default_icon": {
-      "16": "icon16.png",
-      "32": "icon32.png",
-      "48": "icon48.png",
-      "128": "icon128.png"
-    }
-  },
-
-  "icons": {
-    "16": "icon16.png",
-    "32": "icon32.png",
-    "48": "icon48.png",
-    "128": "icon128.png"
-  },
-
-  "content_scripts": [
-    {
-      "matches": [
-        "https://popmartth.rocket-booking.app/*",
-        "https://pmrocketbotautoq.web.app/*",
-        "https://botautoq.web.app/*",
-        "https://popmart.ithitec.com/*",
-        "https://access.line.me/*"
-      ],
-      "js": ["simple-content.js"],
-      "run_at": "document_idle",
-      "all_frames": true
-    }
-  ],
-
-  "background": {
-    "service_worker": "background.js"
-  }
+﻿{
+    "manifest_version":  3,
+    "name":  "BokkChoYxBooking",
+    "version":  "1.0.3",
+    "description":  "`NK\u0027Krittapon Madsen ระบบทดลองจอง POPMART",
+    "permissions":  [
+                        "activeTab",
+                        "storage",
+                        "scripting",
+                        "tabs"
+                    ],
+    "host_permissions":  [
+                             "https://popmartth.rocket-booking.app/*",
+                             "https://pmrocketbotautoq.web.app/*",
+                             "https://botautoq.web.app/*",
+                             "https://popmart.ithitec.com/*",
+                             "https://access.line.me/*",
+                             "https://branch-api.kan-krittapon.workers.dev/*",
+                             "https://auth-worker.kan-krittapon.workers.dev/*"
+                         ],
+    "action":  {
+                   "default_popup":  "popup.html",
+                   "default_title":  "BokkChoYxBooking",
+                   "default_icon":  {
+                                        "16":  "icon16.png",
+                                        "32":  "icon32.png",
+                                        "48":  "icon48.png",
+                                        "128":  "icon128.png"
+                                    }
+               },
+    "icons":  {
+                  "16":  "icon16.png",
+                  "32":  "icon32.png",
+                  "48":  "icon48.png",
+                  "128":  "icon128.png"
+              },
+    "content_scripts":  [
+                            {
+                                "matches":  [
+                                                "https://popmartth.rocket-booking.app/*",
+                                                "https://pmrocketbotautoq.web.app/*",
+                                                "https://botautoq.web.app/*",
+                                                "https://popmart.ithitec.com/*",
+                                                "https://access.line.me/*"
+                                            ],
+                                "js":  [
+                                           "simple-content.js"
+                                       ],
+                                "run_at":  "document_idle",
+                                "all_frames":  true
+                            }
+                        ],
+    "background":  {
+                       "service_worker":  "background.js"
+                   }
 }

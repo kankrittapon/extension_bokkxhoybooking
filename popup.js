@@ -1,348 +1,463 @@
-// Popup script for RocketBooker Extension
-class PopupController {
+﻿const WORKER_BASE_DEFAULT = "https://auth-worker.kan-krittapon.workers.dev";
+const SESSION_REFRESH_MS = 5 * 60 * 1000;
+
+class PopupAuth {
   constructor() {
-    this.initializeElements();
-    this.loadSettings();
-    this.loadBranches();
+    this.state = {
+      token: "",
+      user: null,
+      expiresAt: null,
+      lastChecked: null
+    };
+
+    this.cacheElements();
     this.bindEvents();
-    this.updateStatus();
+    this.bootstrap();
   }
 
-  initializeElements() {
-    this.modeSelect = document.getElementById('mode');
-    this.siteSelect = document.getElementById('site');
-    this.branchSelect = document.getElementById('branch');
-    this.daySelect = document.getElementById('day');
-    this.roundSelect = document.getElementById('round');
-    this.productionOptions = document.getElementById('productionOptions');
-    this.useDelayCheckbox = document.getElementById('useDelay');
-    this.manualRegisterCheckbox = document.getElementById('manualRegister');
-    this.useLineLoginCheckbox = document.getElementById('useLineLogin');
-    this.lineLoginBtn = document.getElementById('lineLoginBtn');
-    this.useProfileCheckbox = document.getElementById('useProfile');
-    this.profileSection = document.getElementById('profileSection');
-    this.firstNameInput = document.getElementById('firstName');
-    this.lastNameInput = document.getElementById('lastName');
-    this.phoneInput = document.getElementById('phone');
-    this.idCardInput = document.getElementById('idCard');
-    this.startBtn = document.getElementById('startBtn');
-    this.stopBtn = document.getElementById('stopBtn');
-    this.clearDataBtn = document.getElementById('clearDataBtn');
-    this.statusDiv = document.getElementById('status');
+  cacheElements() {
+    this.loginView = document.getElementById("loginView");
+    this.registerView = document.getElementById("registerView");
+    this.sessionView = document.getElementById("sessionView");
+    this.messageEl = document.getElementById("message");
+
+    this.loginForm = document.getElementById("loginForm");
+    this.usernameInput = document.getElementById("username");
+    this.passwordInput = document.getElementById("password");
+    this.loginBtn = document.getElementById("loginBtn");
+    this.showRegisterBtn = document.getElementById("showRegisterBtn");
+
+    this.registerForm = document.getElementById("registerForm");
+    this.registerUsernameInput = document.getElementById("registerUsername");
+    this.registerPasswordInput = document.getElementById("registerPassword");
+    this.registerConfirmInput = document.getElementById("registerConfirm");
+    this.registerRoleSelect = document.getElementById("registerRole");
+    this.registerExpiresInput = document.getElementById("registerExpires");
+    this.registerAdminKeyInput = document.getElementById("registerAdminKey");
+    this.registerBtn = document.getElementById("registerBtn");
+    this.backToLoginBtn = document.getElementById("backToLoginBtn");
+
+    this.sessionName = document.getElementById("sessionName");
+    this.sessionRole = document.getElementById("sessionRole");
+    this.sessionExpiry = document.getElementById("sessionExpiry");
+    this.sessionChecked = document.getElementById("sessionChecked");
+    this.sessionLoading = document.getElementById("sessionLoading");
+    this.refreshBtn = document.getElementById("refreshSessionBtn");
+    this.logoutBtn = document.getElementById("logoutBtn");
   }
 
   bindEvents() {
-    this.modeSelect.addEventListener('change', () => {
-      const isProduction = this.modeSelect.value === 'production';
-      this.productionOptions.style.display = isProduction ? 'block' : 'none';
-      this.saveSettings();
-    });
-    
-    this.siteSelect.addEventListener('change', () => {
-      this.loadBranches();
-      this.saveSettings();
-    });
-    
-    this.useLineLoginCheckbox.addEventListener('change', () => {
-      this.lineLoginBtn.style.display = this.useLineLoginCheckbox.checked ? 'block' : 'none';
-      this.saveSettings();
-    });
-    
-    this.useProfileCheckbox.addEventListener('change', () => {
-      this.profileSection.style.display = this.useProfileCheckbox.checked ? 'block' : 'none';
-      this.saveSettings();
+    this.loginForm?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      this.handleLogin();
     });
 
-    this.startBtn.addEventListener('click', () => this.startBooking());
-    this.stopBtn.addEventListener('click', () => this.stopBooking());
-    this.lineLoginBtn.addEventListener('click', () => this.connectLineLogin());
-    this.clearDataBtn.addEventListener('click', () => this.clearAllData());
+    this.refreshBtn?.addEventListener("click", () => {
+      this.refreshSession(false);
+    });
 
-    // Save settings on change
-    [this.modeSelect, this.siteSelect, this.branchSelect, this.daySelect, this.roundSelect, 
-     this.useDelayCheckbox, this.manualRegisterCheckbox, this.useLineLoginCheckbox, this.useProfileCheckbox,
-     this.firstNameInput, this.lastNameInput, this.phoneInput, this.idCardInput].forEach(element => {
-      element.addEventListener('change', () => this.saveSettings());
-      element.addEventListener('input', () => this.saveSettings());
+    this.logoutBtn?.addEventListener("click", () => {
+      this.logout("ออกจากระบบแล้ว");
+    });
+
+    this.showRegisterBtn?.addEventListener("click", () => {
+      this.clearMessage();
+      this.setView("register");
+      this.prefillRegisterDefaults();
+    });
+
+    this.backToLoginBtn?.addEventListener("click", () => {
+      this.clearMessage();
+      this.setView("login");
+    });
+
+    this.registerForm?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      this.handleRegister();
     });
   }
 
-	async loadBranches() {
-	const siteKey = this.siteSelect.value;
-	try {
-	const resp = await chrome.runtime.sendMessage({ action: 'getBranches', site: siteKey });
-    const branches = (resp && resp.branches) ? resp.branches : this.getStaticBranches(siteKey);
-
-    this.branchSelect.innerHTML = '';
-    branches.forEach(b => {
-      const opt = document.createElement('option');
-      opt.value = b; opt.textContent = b;
-      this.branchSelect.appendChild(opt);
-    });
-    console.log(`✅ Loaded ${branches.length} branches for ${siteKey}`);
-  } catch (e) {
-    console.log('⚠️ getBranches failed, fallback static', e);
-    const branches = this.getStaticBranches(siteKey);
-    this.branchSelect.innerHTML = '';
-    branches.forEach(b => {
-      const opt = document.createElement('option');
-      opt.value = b; opt.textContent = b;
-      this.branchSelect.appendChild(opt);
-    });
-  }
-}
-  
-  getStaticBranches(siteKey) {
-    switch (siteKey) {
-      case 'rocketbooking':
-        return ['Terminal 21', 'Centralworld', 'Siam Center', 'Seacon Square', 'MEGABANGNA', 'Central Westgate', 'Central Ladprao', 'Fashion Island', 'Emsphere', 'Central Pattaya', 'Central Chiangmai', 'Icon Siam',"Central Dusit"];
-      case 'botautoq':
-        return ['สาขาหลัก', 'สาขารอง', 'สาขาสาม', 'สาขาสี่', 'สาขาห้า'];
-      case 'ithitec':
-        return ['สาขากลาง', 'สาขาเหนือ', 'สาขาใต้', 'สาขาตะวันออก', 'สาขาตะวันตก'];
-      default:
-        return ['Terminal 21', 'Centralworld', 'Siam Center'];
-    }
+  async bootstrap() {
+    await this.restoreSession();
   }
 
-  async loadSettings() {
+  async restoreSession() {
     try {
-      const settings = await chrome.storage.local.get([
-        'mode', 'site', 'branch', 'day', 'round', 'useDelay', 'manualRegister',
-        'useLineLogin', 'useProfile', 'firstName', 'lastName', 'phone', 'idCard'
+      const stored = await chrome.storage.local.get([
+        "api_token",
+        "auth_user",
+        "auth_expires_at",
+        "auth_last_checked"
       ]);
 
-      if (settings.mode) this.modeSelect.value = settings.mode;
-      if (settings.site) this.siteSelect.value = settings.site;
-      if (settings.branch) this.branchSelect.value = settings.branch;
-      if (settings.day) this.daySelect.value = settings.day;
-      if (settings.round) this.roundSelect.value = settings.round;
-      if (settings.useDelay) this.useDelayCheckbox.checked = settings.useDelay;
-      if (settings.manualRegister) this.manualRegisterCheckbox.checked = settings.manualRegister;
-      if (settings.useLineLogin) {
-        this.useLineLoginCheckbox.checked = settings.useLineLogin;
-        this.lineLoginBtn.style.display = 'block';
-      }
-      if (settings.useProfile) {
-        this.useProfileCheckbox.checked = settings.useProfile;
-        this.profileSection.style.display = 'block';
-      }
-      if (settings.firstName) this.firstNameInput.value = settings.firstName;
-      if (settings.lastName) this.lastNameInput.value = settings.lastName;
-      if (settings.phone) this.phoneInput.value = settings.phone;
-      if (settings.idCard) this.idCardInput.value = settings.idCard;
-      
-      // Update UI based on mode
-      const isProduction = this.modeSelect.value === 'production';
-      this.productionOptions.style.display = isProduction ? 'block' : 'none';
-    } catch (error) {
-      console.error('Failed to load settings:', error);
-    }
-  }
-
-  async saveSettings() {
-    try {
-      const settings = {
-        mode: this.modeSelect.value,
-        site: this.siteSelect.value,
-        branch: this.branchSelect.value,
-        day: this.daySelect.value,
-        round: this.roundSelect.value,
-        useDelay: this.useDelayCheckbox.checked,
-        manualRegister: this.manualRegisterCheckbox.checked,
-        useLineLogin: this.useLineLoginCheckbox.checked,
-        useProfile: this.useProfileCheckbox.checked,
-        firstName: this.firstNameInput.value,
-        lastName: this.lastNameInput.value,
-        phone: this.phoneInput.value,
-        idCard: this.idCardInput.value
-      };
-
-      await chrome.storage.local.set(settings);
-    } catch (error) {
-      console.error('Failed to save settings:', error);
-    }
-  }
-
-  async startBooking() {
-    try {
-      // Get current tab
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      
-      const siteUrls = {
-        'rocketbooking': 'popmartth.rocket-booking.app',
-        'botautoq': 'botautoq.web.app',
-        'ithitec': 'popmart.ithitec.com'
-      };
-      
-      const expectedUrl = siteUrls[this.siteSelect.value];
-      if (!tab.url.includes(expectedUrl)) {
-        this.updateStatus('error', `กรุณาเปิดหน้าเว็บ ${expectedUrl}`);
+      if (!stored.api_token) {
+        this.setView("login");
+        this.clearMessage();
+        this.state = { token: "", user: null, expiresAt: null, lastChecked: null };
         return;
       }
 
-      const config = {
-        mode: this.modeSelect.value,
-        site: this.siteSelect.value,
-        branch: this.branchSelect.value,
-        day: parseInt(this.daySelect.value),
-        round: parseInt(this.roundSelect.value),
-        useDelay: this.useDelayCheckbox.checked,
-        manualRegister: this.manualRegisterCheckbox.checked,
-        useLineLogin: this.useLineLoginCheckbox.checked,
-        useProfile: this.useProfileCheckbox.checked,
-        profile: this.useProfileCheckbox.checked ? {
-          firstName: this.firstNameInput.value,
-          lastName: this.lastNameInput.value,
-          phone: this.phoneInput.value,
-          idCard: this.idCardInput.value
-        } : null
-      };
+      this.state.token = stored.api_token;
+      this.state.user = stored.auth_user || null;
+      this.state.expiresAt = stored.auth_expires_at || null;
+      this.state.lastChecked = stored.auth_last_checked || null;
 
-	// Call start via content API that simple-content.js exposes
-	const TIME_LIST = [
-	'10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
-	'15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00','19:30',
-	'20:00','20:30','21:00','21:30','22:00','22:30','23:00'
-	];
-	const time = (typeof config.round === 'number' && config.round >= 1 && config.round <= TIME_LIST.length)
-	? TIME_LIST[config.round - 1]
-	: undefined;
+      if (this.state.expiresAt && this.isExpired(this.state.expiresAt)) {
+        await this.logout("เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง");
+        return;
+      }
 
-	// อ่าน opts จริงจาก storage
-	const raw = await chrome.storage.local.get(['useDelay','manualRegister','clickDelay','registerDelay']).catch(()=>({}));
-	const opts = {
-	useDelay: !!raw.useDelay,
-	manualRegister: !!raw.manualRegister,
-	clickDelay: Number(raw.clickDelay) || 0,
-	registerDelay: Number(raw.registerDelay) || 0,
-	};
+      this.setView("session");
+      this.updateSessionCard();
 
-// ฉีดโค้ดเข้าแท็บเป้าหมาย
-	await chrome.scripting.executeScript({
-	target: { tabId: tab.id },
-	func: (branch, day, round, time, opts) => {
-		try {
-		if (window.RB_SIMPLE_FAST && window.RB_SIMPLE_FAST.run) {
-			return window.RB_SIMPLE_FAST.run(branch, day, round, opts);
-		}
-		if (window.rocketBooker && typeof window.rocketBooker.startBooking === 'function') {
-			return window.rocketBooker.startBooking({ branch, day, time, ...opts });
-		}
-		return 'NO_ENGINE';
-		} catch (e) {
-		return 'ERR:' + (e && e.message || e);
-		}},
-	args: [config.branch, config.day, config.round, time, opts]
-	});
-
-// อัปเดตปุ่ม/สถานะใน popup
-	this.startBtn.disabled = true;
-	this.stopBtn.disabled = false;
-	this.updateStatus('running', 'กำลังจอง...');
-
-  async stopBooking() {
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      
-      await chrome.tabs.sendMessage(tab.id, {
-        action: 'stopBooking'
-      });
-
-      this.startBtn.disabled = false;
-      this.stopBtn.disabled = true;
-      this.updateStatus('ready', 'พร้อมใช้งาน');
-
-    } catch (error) {
-      console.error('Failed to stop booking:', error);
-      // Force UI update even if message fails
-      this.startBtn.disabled = false;
-      this.stopBtn.disabled = true;
-      this.updateStatus('ready', 'พร้อมใช้งาน');
-    }
-  }
-
-  updateStatus(type = 'ready', message = 'พร้อมใช้งาน') {
-    this.statusDiv.className = `status ${type}`;
-    this.statusDiv.textContent = message;
-  }
-
-  async checkBookingStatus() {
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      
-      const supportedUrls = [
-        'popmartth.rocket-booking.app',
-        'botautoq.web.app', 
-        'popmart.ithitec.com'
-      ];
-      
-      const isSupported = supportedUrls.some(url => tab.url.includes(url));
-      
-      if (isSupported) {
-        const response = await chrome.tabs.sendMessage(tab.id, {
-          action: 'getStatus'
-        });
-        
-        if (response && response.isRunning) {
-          this.startBtn.disabled = true;
-          this.stopBtn.disabled = false;
-          this.updateStatus('running', response.message || 'กำลังจอง...');
-        } else {
-          this.startBtn.disabled = false;
-          this.stopBtn.disabled = true;
-          this.updateStatus('ready', 'พร้อมใช้งาน');
-        }
-      } else {
-        this.updateStatus('error', 'กรุณาเปิดหน้าเว็บที่รองรับ');
+      const stale = !this.state.lastChecked || (Date.now() - this.state.lastChecked) > SESSION_REFRESH_MS;
+      if (!this.state.user || stale) {
+        await this.refreshSession(true);
       }
     } catch (error) {
-      // Content script not ready or page not loaded
-      this.updateStatus('ready', 'พร้อมใช้งาน');
+      console.error("restoreSession failed", error);
+      this.showMessage("error", "ไม่สามารถอ่านข้อมูลเซสชันท้องถิ่นได้");
+      this.setView("login");
     }
   }
 
-  async connectLineLogin() {
+  async handleLogin() {
+    if (!this.usernameInput || !this.passwordInput || !this.loginBtn) return;
+    const username = this.usernameInput.value.trim();
+    const password = this.passwordInput.value;
+
+    if (!username || !password) {
+      this.showMessage("error", "กรุณากรอกชื่อผู้ใช้และรหัสผ่านให้ครบ");
+      return;
+    }
+
     try {
-      const lineData = {
-        accessToken: 'line_token_' + Date.now(),
-        userId: 'U' + Math.random().toString(36).substr(2, 9),
-        displayName: 'ผู้ใช้ LINE',
-        pictureUrl: 'https://example.com/profile.jpg'
+      this.setLoginLoading(true);
+      this.showMessage("info", "กำลังเข้าสู่ระบบ...");
+
+      const base = await this.getWorkerBase();
+      const response = await fetch(`${base}/api/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.ok || !data?.token) {
+        const message = data?.error || "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง";
+        this.showMessage("error", message);
+        this.passwordInput.value = "";
+        this.passwordInput.focus();
+        return;
+      }
+
+      const user = {
+        username,
+        role: (data.role || "user")
       };
-      
-      await chrome.storage.local.set({ lineData });
-      this.updateStatus('ready', 'เชื่อมต่อ LINE สำเร็จ!');
-      
-      setTimeout(() => {
-        this.updateStatus('ready', 'พร้อมใช้งาน');
-      }, 2000);
+      await this.saveSession(data.token, user, data.expiresAt || null);
+      this.loginForm?.reset();
+      this.setView("session");
+      await this.refreshSession(true);
+      if (this.state.token) this.showMessage("success", "เข้าสู่ระบบสำเร็จ");
     } catch (error) {
-      this.updateStatus('error', 'เชื่อมต่อ LINE ไม่สำเร็จ');
+      console.error("handleLogin failed", error);
+      this.showMessage("error", "ไม่สามารถเชื่อมต่อ Cloudflare Worker ได้");
+    } finally {
+      this.setLoginLoading(false);
     }
   }
 
-  async clearAllData() {
-    try {
-      await chrome.storage.local.clear();
-      location.reload();
-    } catch (error) {
-      console.error('Failed to clear data:', error);
+  async handleRegister() {
+    if (!this.registerForm || !this.registerBtn) return;
+    const username = (this.registerUsernameInput?.value || "").trim();
+    const password = this.registerPasswordInput?.value || "";
+    const confirm = this.registerConfirmInput?.value || "";
+    const role = (this.registerRoleSelect?.value || "user").toLowerCase();
+    const expiresValue = this.registerExpiresInput?.value || "";
+    const adminKey = this.registerAdminKeyInput?.value?.trim() || "";
+
+    if (!username || !password || !confirm || !expiresValue) {
+      this.showMessage("error", "กรุณากรอกข้อมูลให้ครบทุกช่อง");
+      return;
     }
+    if (password !== confirm) {
+      this.showMessage("error", "รหัสผ่านยืนยันไม่ตรงกัน");
+      return;
+    }
+
+    const expiresDate = new Date(expiresValue);
+    if (Number.isNaN(expiresDate.getTime())) {
+      this.showMessage("error", "รูปแบบวันหมดอายุไม่ถูกต้อง");
+      return;
+    }
+    if (expiresDate.getTime() <= Date.now()) {
+      this.showMessage("error", "วันหมดอายุต้องอยู่ในอนาคต");
+      return;
+    }
+
+    try {
+      this.setRegisterLoading(true);
+      this.showMessage("info", "กำลังลงทะเบียนบัญชี...");
+
+      const base = await this.getWorkerBase();
+      const payload = {
+        username,
+        password,
+        role,
+        expiresAt: expiresDate.toISOString()
+      };
+      const headers = { "content-type": "application/json" };
+      if (adminKey) headers["x-api-key"] = adminKey;
+
+      const response = await fetch(`${base}/api/register`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.ok) {
+        const message = data?.error || "ลงทะเบียนไม่สำเร็จ";
+        this.showMessage("error", message);
+        return;
+      }
+
+      this.registerForm.reset();
+      this.setView("login");
+      if (this.usernameInput) this.usernameInput.value = username;
+      if (this.passwordInput) this.passwordInput.focus();
+      this.showMessage("success", "สร้างบัญชีเรียบร้อย กรุณาเข้าสู่ระบบด้วยข้อมูลใหม่");
+    } catch (error) {
+      console.error("handleRegister failed", error);
+      this.showMessage("error", "ไม่สามารถเชื่อมต่อ Cloudflare Worker ได้");
+    } finally {
+      this.setRegisterLoading(false);
+    }
+  }
+
+  async refreshSession(silent = false) {
+    if (!this.state.token) return;
+
+    try {
+      this.setSessionLoading(true);
+      if (!silent) this.showMessage("info", "กำลังตรวจสอบเซสชัน...");
+
+      const base = await this.getWorkerBase();
+      const result = await this.fetchMe(base, this.state.token);
+      if (result.ok && result.user) {
+        const user = this.normalizeUser(result.user);
+        const expiresAt = this.extractExpiry(result.user) || this.state.expiresAt;
+        await this.saveSession(this.state.token, user, expiresAt);
+        if (!silent) this.showMessage("success", "อัปเดตเซสชันแล้ว");
+        else this.clearMessage();
+        return;
+      }
+
+      if (result.status === 401) {
+        await this.logout("เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง");
+        return;
+      }
+
+      if (!silent) {
+        this.showMessage("error", result.message || "อัปเดตเซสชันไม่สำเร็จ");
+      } else {
+        console.warn("Silent session refresh failed", result);
+      }
+    } catch (error) {
+      console.error("refreshSession failed", error);
+      if (!silent) this.showMessage("error", "ตรวจสอบเซสชันไม่สำเร็จ");
+    } finally {
+      this.setSessionLoading(false);
+    }
+  }
+
+  async fetchMe(base, token) {
+    try {
+      const response = await fetch(`${base}/api/me`, {
+        method: "GET",
+        headers: { authorization: `Bearer ${token}` },
+        cache: "no-store"
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return {
+          ok: false,
+          status: response.status,
+          message: payload?.error || response.statusText
+        };
+      }
+      return { ok: true, status: response.status, user: payload?.user || null };
+    } catch (error) {
+      return { ok: false, status: 0, message: error?.message || "เครือข่ายขัดข้อง" };
+    }
+  }
+
+  async saveSession(token, user, expiresAt) {
+    const payload = {
+      api_token: token,
+      auth_user: user,
+      auth_expires_at: expiresAt,
+      auth_last_checked: Date.now()
+    };
+    await chrome.storage.local.set(payload);
+    this.state.token = token;
+    this.state.user = user;
+    this.state.expiresAt = expiresAt;
+    this.state.lastChecked = payload.auth_last_checked;
+    this.updateSessionCard();
+  }
+
+  async logout(message) {
+    await chrome.storage.local.remove([
+      "api_token",
+      "auth_user",
+      "auth_expires_at",
+      "auth_last_checked"
+    ]);
+    this.state = { token: "", user: null, expiresAt: null, lastChecked: null };
+    this.setView("login");
+    this.loginForm?.reset();
+    this.registerForm?.reset();
+    this.setLoginLoading(false);
+    this.setRegisterLoading(false);
+    if (this.passwordInput) this.passwordInput.value = "";
+    if (message) this.showMessage("info", message);
+    else this.clearMessage();
+  }
+
+  setView(view) {
+    const showSession = view === "session";
+    const showLogin = view === "login";
+    const showRegister = view === "register";
+    this.sessionView?.classList.toggle("hidden", !showSession);
+    this.loginView?.classList.toggle("hidden", !showLogin);
+    this.registerView?.classList.toggle("hidden", !showRegister);
+    if (showLogin) {
+      this.usernameInput?.focus();
+      if (this.showRegisterBtn) this.showRegisterBtn.disabled = false;
+    }
+    if (showRegister) {
+      this.registerUsernameInput?.focus();
+      if (this.showRegisterBtn) this.showRegisterBtn.disabled = true;
+    }
+    if (!showRegister && this.showRegisterBtn) {
+      this.showRegisterBtn.disabled = false;
+    }
+  }
+
+  setLoginLoading(isLoading) {
+    if (this.loginBtn) this.loginBtn.disabled = isLoading;
+    if (this.usernameInput) this.usernameInput.disabled = isLoading;
+    if (this.passwordInput) this.passwordInput.disabled = isLoading;
+    if (this.showRegisterBtn) this.showRegisterBtn.disabled = isLoading;
+    if (this.loginBtn) this.loginBtn.textContent = isLoading ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ";
+  }
+
+  setRegisterLoading(isLoading) {
+    [
+      this.registerUsernameInput,
+      this.registerPasswordInput,
+      this.registerConfirmInput,
+      this.registerRoleSelect,
+      this.registerExpiresInput,
+      this.registerAdminKeyInput,
+      this.registerBtn,
+      this.backToLoginBtn
+    ].forEach((el) => {
+      if (el) el.disabled = isLoading;
+    });
+    if (this.registerBtn) this.registerBtn.textContent = isLoading ? "กำลังสร้าง..." : "สร้างบัญชี";
+  }
+
+  prefillRegisterDefaults() {
+    if (!this.registerExpiresInput) return;
+    if (this.registerExpiresInput.value) return;
+    const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const local = new Date(future.getTime() - future.getTimezoneOffset() * 60000);
+    this.registerExpiresInput.value = local.toISOString().slice(0, 16);
+  }
+
+  setSessionLoading(isLoading) {
+    this.sessionView?.classList.toggle("loading", isLoading);
+    if (this.refreshBtn) this.refreshBtn.disabled = isLoading;
+    if (this.logoutBtn) this.logoutBtn.disabled = isLoading;
+    if (this.sessionLoading) this.sessionLoading.style.display = isLoading ? "block" : "none";
+  }
+
+  updateSessionCard() {
+    if (!this.state.user) return;
+    if (this.sessionName) this.sessionName.textContent = this.state.user.username || "-";
+    if (this.sessionRole) this.sessionRole.textContent = this.state.user.role || "-";
+    if (this.sessionExpiry) this.sessionExpiry.textContent = this.formatDateTime(this.state.expiresAt);
+    if (this.sessionChecked) this.sessionChecked.textContent = this.formatDateTime(this.state.lastChecked);
+  }
+
+  normalizeUser(user) {
+    if (!user) return null;
+    const username = user.username || user.email || user.sub || "user";
+    return {
+      username,
+      role: user.role || "user",
+      id: user.sub || null
+    };
+  }
+
+  extractExpiry(user) {
+    if (!user) return null;
+    if (user.expiresAt) return user.expiresAt;
+    if (user.exp) return new Date(user.exp * 1000).toISOString();
+    return null;
+  }
+
+  async getWorkerBase() {
+    const stored = await chrome.storage.local.get("worker_base");
+    let base = (stored.worker_base || WORKER_BASE_DEFAULT || "").trim();
+    if (!/^https?:\/\//i.test(base)) base = `https://${base}`;
+    base = base.replace(/\/+$/, "");
+    return base;
+  }
+
+  isExpired(expiresAt) {
+    const date = expiresAt ? new Date(expiresAt) : null;
+    if (!date || Number.isNaN(date.getTime())) return false;
+    return date.getTime() <= Date.now();
+  }
+
+  formatDateTime(value) {
+    if (!value) return "-";
+    const date = typeof value === "number" ? new Date(value) : new Date(String(value));
+    if (Number.isNaN(date.getTime())) return "-";
+    try {
+      return new Intl.DateTimeFormat(navigator.language, {
+        dateStyle: "medium",
+        timeStyle: "short"
+      }).format(date);
+    } catch (error) {
+      console.warn("formatDateTime fallback", error);
+      return date.toISOString();
+    }
+  }
+
+  showMessage(type, text) {
+    if (!this.messageEl) return;
+    if (!text) {
+      this.clearMessage();
+      return;
+    }
+    this.messageEl.textContent = text;
+    this.messageEl.className = `message show ${type}`;
+  }
+
+  clearMessage() {
+    if (!this.messageEl) return;
+    this.messageEl.textContent = "";
+    this.messageEl.className = "message";
   }
 }
 
-// Initialize popup when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-  new PopupController();
+document.addEventListener("DOMContentLoaded", () => {
+  new PopupAuth();
 });
 
-// Listen for messages from content script
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'updateStatus') {
-    const popup = document.querySelector('.popup-controller');
-    if (popup) {
-      popup.updateStatus(message.type, message.message);
-    }
-  }
-});
+

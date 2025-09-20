@@ -1,9 +1,9 @@
-// ======================
+﻿// ======================
 // RocketBooker Background (Worker-aware)
 // ======================
 
 // ===== Worker endpoint config (มี default และรองรับ override ใน storage) =====
-const WORKER_BASE_DEFAULT = "https://branch-api.kan-krittapon.workers.dev";
+const WORKER_BASE_DEFAULT = "https://auth-worker.kan-krittapon.workers.dev";
 
 // เก็บ/อ่านฐาน URL ของ Worker (ถ้าอยากเปลี่ยนที่ runtime)
 async function setWorkerBase(url) {
@@ -57,7 +57,9 @@ async function getApiToken() {
 async function refreshBranchesFromWorker() {
   try {
     const EP = await buildWorkerEndpoints();
-    const data = await fetchJSON(EP.branches);
+    const token = await getApiToken();
+    const headers = token ? { authorization: `Bearer ${token}` } : {};
+    const data = await fetchJSON(EP.branches, { headers });
     // รองรับ 2 รูปแบบจาก Worker:
     // - { ok:true, data: { rocketbooking:[], botautoq:[], ithitec:[], version, updated_at } }
     // - { ok:true, data: { rocketbooking:[...]} } (ถ้าห่อจาก branch.json เดิม)
@@ -120,7 +122,9 @@ async function getBranchesForSite(siteKey) {
 async function refreshConfigFromWorker() {
   try {
     const EP = await buildWorkerEndpoints();
-    const data = await fetchJSON(EP.config);
+    const token = await getApiToken();
+    const headers = token ? { authorization: `Bearer ${token}` } : {};
+    const data = await fetchJSON(EP.config, { headers });
     if (!data?.ok || !data?.data) throw new Error('config not ok');
     await chrome.storage.local.set({
       ext_config: data.data,
@@ -300,3 +304,4 @@ class BackgroundService {
 
 const backgroundService = new BackgroundService();
 console.log("🚀 RocketBooker Background Started (FAST)");
+

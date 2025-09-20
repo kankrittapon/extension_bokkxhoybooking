@@ -2,250 +2,242 @@
 <html>
 <head>
   <meta charset="utf-8">
+  <title>การเข้าถึง RocketBooker</title>
   <style>
+    :root { color-scheme: light dark; }
     body {
-      width: 350px;
-      padding: 20px;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
       margin: 0;
+      padding: 0;
+      width: 360px;
+      min-height: 460px;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #3f51b5 0%, #673ab7 100%);
+      color: #fff;
     }
-    
+    .container {
+      padding: 20px 22px 30px;
+    }
     .header {
       text-align: center;
-      margin-bottom: 20px;
+      margin-bottom: 18px;
     }
-    
     .header h1 {
       margin: 0;
       font-size: 24px;
-      font-weight: bold;
+      font-weight: 700;
     }
-    
-    .form-group {
-      margin-bottom: 15px;
+    .header p {
+      margin: 8px 0 0;
+      font-size: 13px;
+      opacity: 0.85;
     }
-    
-    .form-group label {
+    .card {
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 14px;
+      padding: 18px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+      margin-bottom: 16px;
+    }
+    .hidden { display: none; }
+    .form-label {
       display: block;
-      margin-bottom: 5px;
+      font-size: 12px;
       font-weight: 600;
+      margin-bottom: 6px;
+      letter-spacing: 0.3px;
     }
-    
-    .form-group select,
-    .form-group input {
+    input[type="text"],
+    input[type="password"],
+    input[type="datetime-local"],
+    select {
       width: 100%;
-      padding: 8px;
+      padding: 10px 12px;
+      border-radius: 8px;
       border: none;
-      border-radius: 5px;
       font-size: 14px;
+      margin-bottom: 14px;
+      color: #222;
       box-sizing: border-box;
     }
-    
-    .checkbox-group {
-      display: flex;
-      align-items: center;
-      margin-bottom: 15px;
+    input[type="text"]:focus,
+    input[type="password"]:focus,
+    input[type="datetime-local"]:focus,
+    select:focus {
+      outline: 2px solid rgba(255, 255, 255, 0.45);
     }
-    
-    .checkbox-group input[type="checkbox"] {
-      width: auto;
-      margin-right: 8px;
-    }
-    
     .btn {
       width: 100%;
       padding: 12px;
       border: none;
-      border-radius: 5px;
-      font-size: 16px;
-      font-weight: bold;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
       cursor: pointer;
-      margin-bottom: 10px;
-      transition: all 0.3s ease;
+      transition: transform 0.18s ease, opacity 0.18s ease;
     }
-    
-    .btn-start {
-      background: #28a745;
-      color: white;
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .btn.primary { background: #4caf50; color: #fff; }
+    .btn.primary:hover { transform: translateY(-1px); }
+    .btn.secondary { background: rgba(255, 255, 255, 0.18); color: #fff; }
+    .btn.danger { background: #e53935; color: #fff; }
+    .row-buttons {
+      display: flex;
+      gap: 10px;
     }
-    
-    .btn-start:hover {
-      background: #218838;
+    .row-buttons .btn { flex: 1; }
+    .message {
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 13px;
+      margin-bottom: 14px;
+      background: rgba(255, 255, 255, 0.16);
+      display: none;
     }
-    
-    .btn-stop {
-      background: #dc3545;
-      color: white;
-    }
-    
-    .btn-stop:hover {
-      background: #c82333;
-    }
-    
-    .btn:disabled {
-      background: #6c757d;
-      cursor: not-allowed;
-    }
-    
-    .status {
+    .message.info { background: rgba(33, 150, 243, 0.25); }
+    .message.error { background: rgba(244, 67, 54, 0.28); }
+    .message.success { background: rgba(76, 175, 80, 0.3); }
+    .message.show { display: block; }
+    .hint {
+      margin: 12px 0 0;
+      font-size: 12px;
+      opacity: 0.7;
       text-align: center;
-      padding: 10px;
-      border-radius: 5px;
-      margin-top: 10px;
-      font-weight: bold;
     }
-    
-    .status.ready {
-      background: rgba(40, 167, 69, 0.2);
-      border: 1px solid #28a745;
+    .link-btn {
+      width: 100%;
+      background: transparent;
+      border: none;
+      color: #fff;
+      text-decoration: underline;
+      cursor: pointer;
+      font-size: 13px;
+      padding: 6px 0;
+      margin-top: 6px;
     }
-    
-    .status.running {
-      background: rgba(255, 193, 7, 0.2);
-      border: 1px solid #ffc107;
+    .link-btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      text-decoration: none;
     }
-    
-    .status.error {
-      background: rgba(220, 53, 69, 0.2);
-      border: 1px solid #dc3545;
+    .loading-indicator {
+      margin-top: 12px;
+      font-size: 12px;
+      opacity: 0.8;
+      display: none;
+      text-align: center;
     }
+    .loading .loading-indicator { display: block; }
+    .session-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .session-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      opacity: 0.8;
+    }
+    .session-value {
+      font-size: 14px;
+      font-weight: 600;
+      margin-top: 4px;
+    }
+    .session-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.22);
+      font-size: 13px;
+      font-weight: 600;
+      margin-top: 4px;
+    }
+    .session-actions {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 18px;
+      gap: 10px;
+    }
+    .session-actions .btn { flex: 1; }
   </style>
 </head>
 <body>
-  <div class="header">
-    <h1>🚀 RocketBooker</h1>
+  <div class="container">
+    <header class="header">
+      <h1>การเข้าถึง RocketBooker</h1>
+      <p>เข้าสู่ระบบเพื่อใช้งานเครื่องมือจองความเร็วสูง</p>
+    </header>
+
+    <div id="message" class="message"></div>
+
+    <section id="sessionView" class="card hidden">
+      <div class="session-row">
+        <div>
+          <div class="session-label">ผู้ใช้</div>
+          <div id="sessionName" class="session-value">-</div>
+        </div>
+        <div>
+          <div class="session-label">สิทธิ์</div>
+          <div id="sessionRole" class="session-badge">-</div>
+        </div>
+      </div>
+      <div class="session-row">
+        <div>
+          <div class="session-label">วันหมดอายุ</div>
+          <div id="sessionExpiry" class="session-value">-</div>
+        </div>
+        <div>
+          <div class="session-label">ตรวจสอบล่าสุด</div>
+          <div id="sessionChecked" class="session-value">-</div>
+        </div>
+      </div>
+      <div class="session-actions">
+        <button id="refreshSessionBtn" class="btn secondary" type="button">รีเฟรช</button>
+        <button id="logoutBtn" class="btn danger" type="button">ออกจากระบบ</button>
+      </div>
+      <div id="sessionLoading" class="loading-indicator">กำลังตรวจสอบสถานะ...</div>
+    </section>
+
+    <section id="loginView" class="card">
+      <form id="loginForm">
+        <label class="form-label" for="username">ชื่อผู้ใช้</label>
+        <input id="username" name="username" type="text" autocomplete="username" required />
+        <label class="form-label" for="password">รหัสผ่าน</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+        <button id="loginBtn" class="btn primary" type="submit">เข้าสู่ระบบ</button>
+      </form>
+      <button id="showRegisterBtn" class="link-btn" type="button">สร้างบัญชีใหม่</button>
+      <p class="hint">ยังไม่มีบัญชี? ติดต่อผู้ดูแลหรือใช้คีย์ผู้ดูแลเพื่อสมัคร</p>
+    </section>
+
+    <section id="registerView" class="card hidden">
+      <form id="registerForm">
+        <label class="form-label" for="registerUsername">ชื่อผู้ใช้</label>
+        <input id="registerUsername" name="registerUsername" type="text" autocomplete="username" required />
+        <label class="form-label" for="registerPassword">รหัสผ่าน</label>
+        <input id="registerPassword" name="registerPassword" type="password" autocomplete="new-password" required />
+        <label class="form-label" for="registerConfirm">ยืนยันรหัสผ่าน</label>
+        <input id="registerConfirm" name="registerConfirm" type="password" autocomplete="new-password" required />
+        <label class="form-label" for="registerRole">สิทธิ์การใช้งาน</label>
+        <select id="registerRole" name="registerRole">
+          <option value="user">ผู้ใช้ (user)</option>
+          <option value="viewer">ผู้ชม (viewer)</option>
+          <option value="admin">ผู้ดูแล (admin)</option>
+        </select>
+        <label class="form-label" for="registerExpires">วันหมดอายุ</label>
+        <input id="registerExpires" name="registerExpires" type="datetime-local" required />
+        <label class="form-label" for="registerAdminKey">คีย์ผู้ดูแล (ถ้าจำเป็น)</label>
+        <input id="registerAdminKey" name="registerAdminKey" type="password" autocomplete="off" placeholder="ไม่บังคับ" />
+        <div class="row-buttons">
+          <button id="registerBtn" class="btn primary" type="submit">สร้างบัญชี</button>
+          <button id="backToLoginBtn" class="btn secondary" type="button">ย้อนกลับ</button>
+        </div>
+      </form>
+      <p class="hint">ปล่อยคีย์ผู้ดูแลว่างได้เฉพาะตอนสร้างบัญชีแรกเท่านั้น</p>
+    </section>
   </div>
-  
-  <div class="form-group">
-    <label for="branch">สาขา:</label>
-    <select id="branch">
-      <option value="">กำลังโหลด...</option>
-    </select>
-  </div>
-  
-  <div class="form-group">
-    <label for="mode">โหมด:</label>
-    <select id="mode">
-      <option value="trial">ทดลอง (Trial)</option>
-      <option value="production">ใช้งานจริง (Production)</option>
-    </select>
-  </div>
-  
-  <div class="form-group">
-    <label for="site">เว็บไซต์:</label>
-    <select id="site">
-      <option value="rocketbooking">PopMart Thailand (Exclusive)</option>
-      <option value="botautoq">BotAutoQ (Trial)</option>
-      <option value="ithitec">PopMart iTHiTEC (Trial)</option>
-    </select>
-  </div>
-  
-  <div class="form-group">
-    <label for="day">วันที่:</label>
-    <select id="day">
-      <option value="1">1</option>
-      <option value="2">2</option>
-      <option value="3">3</option>
-      <option value="4">4</option>
-      <option value="5">5</option>
-      <option value="6">6</option>
-      <option value="7">7</option>
-      <option value="8">8</option>
-      <option value="9">9</option>
-      <option value="10">10</option>
-      <option value="11">11</option>
-      <option value="12">12</option>
-      <option value="13">13</option>
-      <option value="14">14</option>
-      <option value="15">15</option>
-      <option value="16">16</option>
-      <option value="17">17</option>
-      <option value="18">18</option>
-      <option value="19">19</option>
-      <option value="20">20</option>
-    </select>
-  </div>
-  
-  <div class="form-group">
-    <label for="round">รอบ:</label>
-    <select id="round">
-      <option value="1">1</option>
-      <option value="2">2</option>
-      <option value="3">3</option>
-      <option value="4">4</option>
-      <option value="5">5</option>
-      <option value="6">6</option>
-      <option value="7">7</option>
-      <option value="8">8</option>
-      <option value="9">9</option>
-      <option value="10">10</option>
-      <option value="11">11</option>
-      <option value="12">12</option>
-      <option value="13">13</option>
-      <option value="14">14</option>
-      <option value="15">15</option>
-      <option value="16">16</option>
-      <option value="17">17</option>
-      <option value="18">18</option>
-      <option value="19">19</option>
-      <option value="20">20</option>
-    </select>
-  </div>
-  
-  <div id="productionOptions" style="display: none;">
-    <div class="checkbox-group">
-      <input type="checkbox" id="useDelay">
-      <label for="useDelay">เพิ่ม Delay</label>
-    </div>
-    
-    <div class="checkbox-group">
-      <input type="checkbox" id="manualRegister">
-      <label for="manualRegister">กด Register ด้วยตัวเอง</label>
-    </div>
-    
-    <div class="checkbox-group">
-      <input type="checkbox" id="useLineLogin">
-      <label for="useLineLogin">LINE Login อัตโนมัติ</label>
-    </div>
-    
-    <button id="lineLoginBtn" class="btn" style="background: #00C300; display: none;">🔗 เชื่อมต่อ LINE</button>
-  </div>
-  
-  <div class="checkbox-group">
-    <input type="checkbox" id="useProfile">
-    <label for="useProfile">ใช้ข้อมูลโปรไฟล์</label>
-  </div>
-  
-  <div id="profileSection" style="display: none;">
-    <div class="form-group">
-      <label for="firstName">ชื่อ:</label>
-      <input type="text" id="firstName" placeholder="ชื่อจริง">
-    </div>
-    
-    <div class="form-group">
-      <label for="lastName">นามสกุล:</label>
-      <input type="text" id="lastName" placeholder="นามสกุล">
-    </div>
-    
-    <div class="form-group">
-      <label for="phone">เบอร์โทร:</label>
-      <input type="text" id="phone" placeholder="08xxxxxxxx">
-    </div>
-    
-    <div class="form-group">
-      <label for="idCard">เลขบัตรประชาชน:</label>
-      <input type="text" id="idCard" placeholder="13 หลัก">
-    </div>
-  </div>
-  
-  <button id="startBtn" class="btn btn-start">เริ่มจอง</button>
-  <button id="stopBtn" class="btn btn-stop" disabled>หยุด</button>
-  <button id="clearDataBtn" class="btn" style="background: #6c757d; font-size: 12px;">🗑️ ลบข้อมูล</button>
-  
-  <div id="status" class="status ready">พร้อมใช้งาน</div>
-  
   <script src="popup.js"></script>
 </body>
 </html>

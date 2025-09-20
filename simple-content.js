@@ -45,6 +45,151 @@ function detectSite() {
 // ---------- Branch list ----------
 let BRANCHES = [];
 
+const AUTH_ROLE_LEVEL = { viewer: 0, user: 1, admin: 2 };
+const AUTH_STATE = {
+  token: null,
+  role: null,
+  username: null,
+  expiresAt: null,
+  valid: false,
+  lastChecked: null
+};
+let AUTH_NOTICE_SHOWN = false;
+
+function authRoleRank(role) {
+  const key = String(role || '').toLowerCase();
+  return Object.prototype.hasOwnProperty.call(AUTH_ROLE_LEVEL, key) ? AUTH_ROLE_LEVEL[key] : -1;
+}
+
+function hasRole(requiredRole) {
+  if (!AUTH_STATE.valid) return false;
+  if (!requiredRole) return AUTH_STATE.valid;
+  return authRoleRank(AUTH_STATE.role) >= authRoleRank(requiredRole);
+}
+
+function isAuthReady() {
+  return AUTH_STATE.valid;
+}
+
+async function refreshAuthFromStorage() {
+  try {
+    const data = (await chrome.storage?.local?.get?.(['api_token', 'auth_user', 'auth_expires_at'])) || {};
+    const token = data.api_token;
+    const user = data.auth_user;
+    const expiresRaw = data.auth_expires_at || user?.expiresAt || null;
+    let valid = false;
+
+    if (token && user) {
+      const expiresTime = expiresRaw ? new Date(expiresRaw).getTime() : null;
+      const expired = expiresTime && expiresTime <= Date.now();
+      if (!expired) {
+        AUTH_STATE.token = token;
+        AUTH_STATE.role = String(user.role || 'viewer').toLowerCase();
+        AUTH_STATE.username = user.username || user.email || user.sub || 'user';
+        AUTH_STATE.expiresAt = expiresRaw;
+        AUTH_STATE.valid = true;
+        AUTH_STATE.lastChecked = Date.now();
+        valid = true;
+      }
+    }
+
+    if (!valid) {
+      AUTH_STATE.token = null;
+      AUTH_STATE.role = null;
+      AUTH_STATE.username = null;
+      AUTH_STATE.expiresAt = null;
+      AUTH_STATE.valid = false;
+      AUTH_STATE.lastChecked = null;
+    }
+  } catch (error) {
+    console.warn('Auth state refresh failed', error);
+    AUTH_STATE.token = null;
+    AUTH_STATE.role = null;
+    AUTH_STATE.username = null;
+    AUTH_STATE.expiresAt = null;
+    AUTH_STATE.valid = false;
+    AUTH_STATE.lastChecked = null;
+  }
+  updateOverlayAuthUI();
+  return AUTH_STATE;
+}
+
+function resetStartButton() {
+  const startBtn = document.getElementById('rb-start');
+  if (!startBtn) return;
+  if (isRunning) {
+    startBtn.disabled = true;
+    return;
+  }
+  if (hasRole('user')) {
+    startBtn.disabled = false;
+    startBtn.textContent = 'เริ่มจอง ⚡ ULTRA FAST';
+  } else {
+    startBtn.disabled = true;
+    startBtn.textContent = 'ล็อกสำหรับ Viewer';
+  }
+}
+
+function applyRoleRestrictions() {
+  const viewerMode = !hasRole('user');
+  if (!isRunning) {
+    resetStartButton();
+  } else if (viewerMode) {
+    const startBtn = document.getElementById('rb-start');
+    if (startBtn) startBtn.disabled = true;
+  }
+  const stopBtn = document.getElementById('rb-stop');
+  if (stopBtn) stopBtn.disabled = viewerMode;
+  const warning = document.getElementById('rb-auth-warning');
+  if (warning) warning.style.display = viewerMode ? 'block' : 'none';
+}
+
+function updateOverlayAuthUI() {
+  if (typeof overlay === 'undefined') return;
+  const overlayRoot = overlay;
+  if (!overlayRoot) return;
+
+  if (!AUTH_STATE.valid) {
+    overlayRoot.style.display = 'none';
+    const summary = document.getElementById('rb-auth-summary');
+    if (summary) summary.style.display = 'none';
+    const warn = document.getElementById('rb-auth-warning');
+    if (warn) warn.style.display = 'none';
+    applyRoleRestrictions();
+    if (!AUTH_NOTICE_SHOWN) {
+      try { addLog('🔒 กรุณาเข้าสู่ระบบจาก popup ก่อนใช้งาน RocketBooker', '#FFB6C1'); } catch {}
+      AUTH_NOTICE_SHOWN = true;
+    }
+    return;
+  }
+
+  AUTH_NOTICE_SHOWN = false;
+  overlayRoot.style.display = 'block';
+  const summary = document.getElementById('rb-auth-summary');
+  const userEl = document.getElementById('rb-auth-user');
+  const roleEl = document.getElementById('rb-auth-role');
+  if (summary) summary.style.display = 'flex';
+  if (userEl) userEl.textContent = AUTH_STATE.username || '-';
+  if (roleEl) roleEl.textContent = (AUTH_STATE.role || '-').toUpperCase();
+
+  applyRoleRestrictions();
+  try { setOverlayStatusBadge?.(); } catch {}
+}
+
+function initAuthGate() {
+  refreshAuthFromStorage();
+  try {
+    chrome.storage?.onChanged?.addListener?.((changes, areaName) => {
+      if (areaName !== 'local') return;
+      if (changes.api_token || changes.auth_user || changes.auth_expires_at) {
+        refreshAuthFromStorage();
+      }
+    });
+  } catch (error) {
+    console.warn('Auth gate listener failed', error);
+  }
+}
+
 // ---------- Overlay UI ----------
 const overlay = document.createElement('div');
 overlay.innerHTML = `
@@ -53,6 +198,17 @@ overlay.innerHTML = `
   <div style="display:flex;justify-content:space-between;margin-bottom:15px;">
     <span style="font-weight:bold;">🚀 RocketBooker FAST</span>
     <button id="rb-close" style="background:none;border:none;color:white;cursor:pointer;font-size:18px;">×</button>
+  </div>
+
+  <div id="rb-auth-summary" style="display:none;margin-bottom:12px;padding:10px;border-radius:8px;background:rgba(0,0,0,0.25);justify-content:space-between;align-items:center;">
+    <div>
+      <div style="font-size:12px;opacity:0.8;">Signed in as</div>
+      <div id="rb-auth-user" style="font-size:14px;font-weight:bold;">-</div>
+    </div>
+    <div id="rb-auth-role" style="font-size:12px;font-weight:bold;background:rgba(255,255,255,0.25);padding:4px 10px;border-radius:999px;">-</div>
+  </div>
+  <div id="rb-auth-warning" style="display:none;margin-bottom:12px;padding:10px;border-radius:8px;background:rgba(255,193,7,0.3);font-size:12px;line-height:1.4;">
+    Viewer role: start booking is disabled for this account.
   </div>
 
   <div style="margin-bottom:15px;">
@@ -109,9 +265,10 @@ overlay.innerHTML = `
 
   <div id="rb-status" style="text-align:center;padding:12px;border-radius:6px;background:rgba(255,255,255,0.2);font-size:14px;font-weight:bold;margin-bottom:15px;">กำลังตรวจสอบ...</div>
 
-  <button id="rb-start" style="width:100%;padding:12px;border:none;border-radius:6px;background:#28a745;color:white;cursor:pointer;font-weight:bold;font-size:14px;margin-bottom:10px;">เริ่มจอง FAST</button>
+  <button id="rb-start" style="width:100%;padding:12px;border:none;border-radius:6px;background:#28a745;color:white;cursor:pointer;font-weight:bold;font-size:14px;margin-bottom:10px;">เริ่มจอง ⚡ ULTRA FAST</button>
 </div>
 `;
+overlay.style.display = 'none';
 document.body.appendChild(overlay);
 
 function ensureOverlay() {
@@ -133,6 +290,8 @@ function ensureOverlay() {
       window.isStopped = true;
       isRunning = false;
       try { addLog('⏹️ กด Stop จาก Overlay', '#FFB6C1'); } catch {}
+      resetStartButton();
+      applyRoleRestrictions();
     });
     if (startBtn && startBtn.parentElement) {
       startBtn.parentElement.insertBefore(stopBtn, startBtn.nextSibling);
@@ -143,6 +302,7 @@ function ensureOverlay() {
   return panel;
 }
 ensureOverlay();
+initAuthGate();
 
 // ---------- Overlay badge ----------
 function setOverlayStatusBadge() {
@@ -161,8 +321,10 @@ function setOverlayStatusBadge() {
   const manualRegister = (mode === 'production' && uiManual) || opts.manualRegister === true;
   const useDelay = (mode === 'production' && (document.getElementById('rb-use-delay')?.checked || false)) || opts.useDelay === true;
   const loopMode = document.getElementById('rb-loop-mode')?.checked || false;
+  const roleLabel = (AUTH_STATE.role || 'guest').toUpperCase();
 
-  badge.textContent = `Mode: ${mode} | ManualRegister: ${manualRegister ? 'ON' : 'OFF'} | Delay: ${useDelay ? 'ON' : 'OFF'} | Loop: ${loopMode ? 'ON' : 'OFF'}`;
+  badge.textContent = `Role: ${roleLabel} | Mode: ${mode} | Manual: ${manualRegister ? 'ON' : 'OFF'} | Delay: ${useDelay ? 'ON' : 'OFF'} | Loop: ${loopMode ? 'ON' : 'OFF'}`;
+  applyRoleRestrictions();
 }
 setOverlayStatusBadge();
 document.getElementById('rb-use-delay')?.addEventListener('change', setOverlayStatusBadge);
@@ -997,6 +1159,8 @@ async function confirmBookingFinal(){
 
 // ---------- Main flow ----------
 async function startBooking() {
+  if (!AUTH_STATE.valid) { addLog('🔒 กรุณาเข้าสู่ระบบจาก popup ก่อนเริ่มจอง', '#FFB6C1'); resetStartButton(); return; }
+  if (!hasRole('user')) { addLog('🚫 บทบาทนี้ไม่สามารถเริ่มการจองได้', '#FFB6C1'); resetStartButton(); return; }
   if (isRunning) { addLog('⚠️ กำลังทำงานอยู่แล้ว', '#FFB6C1'); return; }
 
   const stopError = Symbol('STOP');
@@ -1084,8 +1248,9 @@ async function startBooking() {
     }
   } finally {
     isRunning = false;
-    if (startBtn) { startBtn.textContent = 'เริ่มจอง ⚡ ULTRA FAST'; startBtn.disabled = false; }
+    resetStartButton();
     if (stopBtn)  { stopBtn.disabled = true; }
+    applyRoleRestrictions();
     try { setOverlayStatusBadge?.(); } catch {}
   }
 }
@@ -1094,6 +1259,8 @@ async function startBooking() {
 if (!window.rocketBooker) window.rocketBooker = {};
 window.rocketBooker.startBooking = async function startBookingWithConfig(optionalConfig){
   try {
+    if (!AUTH_STATE.valid) { addLog('🔒 กรุณาเข้าสู่ระบบก่อนเรียก startBooking()', '#FFB6C1'); resetStartButton(); return; }
+    if (!hasRole('user')) { addLog('🚫 บทบาทนี้ไม่สามารถเริ่มการจองได้', '#FFB6C1'); resetStartButton(); return; }
     if (optionalConfig && typeof optionalConfig === 'object') {
       const { branch, day, time, manualRegister, useDelay, clickDelay, registerDelay } = optionalConfig;
       try { window.RB_OPTS = { manualRegister, useDelay, clickDelay, registerDelay }; } catch {}
