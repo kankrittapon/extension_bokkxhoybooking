@@ -623,23 +623,29 @@ function findButtonByText(texts = []) {
 }
 
 function makeGoldenTicket() {
-  const w = [2497, 2468, 2497, 2408, 2025, 2552, 2604];
-  const brand = btoa(
-    Array.from(String.fromCharCode(...w.map(e => (e - 17 + 104729) * 10127 % 104729)))
-      .map(e => e.charCodeAt(0))
-      .map(e => (31 * e + 17) % 104729)
+  const seed = [2497, 2468, 2497, 2408, 2025, 2552, 2604];
+  const key = btoa(
+    Array.from(String.fromCharCode(...seed.map(n => (n - 17 + 104729) * 10127 % 104729)))
+      .map(ch => ch.charCodeAt(0))
+      .map(code => (31 * code + 17) % 104729)
       .join(',')
-  ).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+  )
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
 
-  const fakeData = {
-    ts: Math.floor(Date.now()/1000),
-    d: 1, acc: 100,
-    t: Math.round((3 + Math.random() * 2) * 1000),
-    mv: 10 + Math.floor(Math.random() * 5),
-    re: 5 + Math.floor(Math.random() * 3),
-    brand
+  const rand = 0.8;
+  const payload = {
+    ts: Math.floor(Date.now() / 1000),
+    d: 1,
+    acc: 100,
+    t: Math.round((3 + rand * 2) * 1000),
+    mv: 10 + Math.floor(rand * 5),
+    re: 5 + Math.floor(rand * 3),
+    key
   };
-  return btoa(JSON.stringify(fakeData)).substring(0, 256);
+
+  return btoa(JSON.stringify(payload)).substring(0, 256);
 }
 
 // ---------- React/Shadow helpers ----------
@@ -657,9 +663,12 @@ function forEachNodeDeep(root, visit) {
   }
 }
 
-function collectReactSuccessCallbacks(limit = 50) {
+function collectReactSuccessCallbacks(root = document.body, limit = 50) {
+  const DOCUMENT_NODE = 9;
+  const base = root && root.nodeType === DOCUMENT_NODE ? root.documentElement || root : root;
+  if (!base) return [];
   const out = [];
-  forEachNodeDeep(document.body, (el) => {
+  forEachNodeDeep(base, (el) => {
     for (const k in el) {
       if (!k.startsWith('__reactFiber$') && !k.startsWith('__reactProps$')) continue;
       const fiber = el[k]?.return?.return || el[k]?.return || el[k];
@@ -674,21 +683,173 @@ function collectReactSuccessCallbacks(limit = 50) {
   return out;
 }
 
-async function pushGoldenTicketGlobally(limit = 80) {
+async function pushGoldenTicketGlobally(limit = 80, root = document.body) {
   const ticket = (typeof makeGoldenTicket === 'function') ? makeGoldenTicket() : 'ticket';
-  const cbs = collectReactSuccessCallbacks(limit);
+  const cbs = collectReactSuccessCallbacks(root, limit);
   let fired = false;
   for (const { cb } of cbs) {
-    try { cb(ticket); fired = true; } catch {}
-    if (!fired) { try { cb({ goldenTicket: true, ticket }); fired = true; } catch {} }
+    if (typeof cb !== 'function') continue;
+    let handled = false;
+    try {
+      const res = cb(ticket);
+      if (res !== false) handled = true;
+    } catch {}
+    if (!handled) {
+      try {
+        cb({ goldenTicket: true, ticket });
+        handled = true;
+      } catch {}
+    }
+    fired = fired || handled;
   }
   return fired;
 }
 
-async function findMinigameHostDeep(selectors, maxWaitMs = 1500) {
+const MINIGAME_HOST_SELECTORS = [
+  '.sc-623bb80d-0',
+  '[data-minigame-root]',
+  '.react-captcha-root',
+  '[class*"captcha"]',
+  '[class*"minigame"]',
+  '[id*"captcha"]',
+  '[id*"minigame"]'
+];
+
+async function attemptSolveInRoot(root) {
+  try {
+    const queryRoot = root && typeof root.querySelectorAll === 'function' ? root : root?.documentElement;
+    if (!queryRoot) return false;
+    const ticket = makeGoldenTicket();
+
+    const tryChain = async (node) => {
+      if (!node || node.nodeType !== 1) return false;
+      if (await pushOnSuccessFromElement(node, ticket)) return true;
+      const p1 = node.parentElement;
+      if (p1 && await pushOnSuccessFromElement(p1, ticket)) return true;
+      const p2 = p1?.parentElement;
+      if (p2 && await pushOnSuccessFromElement(p2, ticket)) return true;
+      return false;
+    };
+
+    for (const selector of MINIGAME_HOST_SELECTORS) {
+      let nodes = [];
+      try { nodes = Array.from(queryRoot.querySelectorAll(selector)); } catch {}
+      for (const node of nodes) {
+        if (!node || node.nodeType !== 1) continue;
+        if (node.offsetParent === null) continue;
+        if (await tryChain(node)) return true;
+      }
+    }
+
+    if (await pushGoldenTicketGlobally(60, queryRoot)) return true;
+  } catch {}
+  return false;
+}
+
+function installMinigameAutoWatcher(timeoutMs = 6000) {
+  try { window.__rbMinigameWatcherCleanup?.(); } catch {}
+  try {
+    if (typeof timeoutMs !== 'number' || timeoutMs <= 0) return;
+    const start = Date.now();
+    const deadline = start + timeoutMs;
+    const cleanupFns = [];
+    let resolved = false;
+    let disposed = false;
+    let pending = false;
+    let observer = null;
+    let iframeObserver = null;
+    let timeoutId = null;
+
+    const cleanup = () => {
+      if (disposed) return;
+      disposed = true;
+      try { observer?.disconnect(); } catch {}
+      try { iframeObserver?.disconnect(); } catch {}
+      if (timeoutId) clearTimeout(timeoutId);
+      for (const fn of cleanupFns) {
+        try { fn(); } catch {}
+      }
+      window.__rbMinigameWatcherCleanup = null;
+    };
+
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
+      addLog('✅ Minigame watcher: ส่ง Golden Ticket อัตโนมัติ', '#90EE90');
+      cleanup();
+    };
+
+    const trigger = (root) => {
+      if (disposed || resolved) return;
+      if (Date.now() > deadline) { cleanup(); return; }
+      if (pending) return;
+      pending = true;
+      Promise.resolve()
+        .then(() => attemptSolveInRoot(root))
+        .then((ok) => {
+          pending = false;
+          if (ok) finish();
+        })
+        .catch(() => { pending = false; });
+    };
+
+    addLog('👀 ตั้ง watcher มินิเกม (auto)', '#87CEEB');
+    trigger(document);
+
+    observer = new MutationObserver(() => trigger(document));
+    observer.observe(document.documentElement || document, { childList: true, subtree: true });
+
+    const watchFrame = (frame) => {
+      try {
+        if (!frame || frame.__rbMinigameWatcherAttached) return;
+        frame.__rbMinigameWatcherAttached = true;
+        const connect = () => {
+          try {
+            const doc = frame.contentDocument;
+            if (!doc) return;
+            trigger(doc);
+            const frameObserver = new MutationObserver(() => trigger(doc));
+            const target = doc.documentElement || doc;
+            frameObserver.observe(target, { childList: true, subtree: true });
+            cleanupFns.push(() => frameObserver.disconnect());
+          } catch {}
+        };
+        if (frame.contentDocument) connect();
+        frame.addEventListener?.('load', connect);
+      } catch {}
+    };
+
+    document.querySelectorAll('iframe').forEach(watchFrame);
+
+    iframeObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node?.tagName === 'IFRAME') {
+            watchFrame(node);
+          }
+        }
+      }
+    });
+    iframeObserver.observe(document.documentElement || document, { childList: true, subtree: true });
+
+    timeoutId = setTimeout(() => {
+      if (!resolved) addLog('⌛ Minigame watcher หมดเวลา', '#FFB6C1');
+      cleanup();
+    }, timeoutMs);
+
+    window.__rbMinigameWatcherCleanup = cleanup;
+  } catch (err) {
+    try { console.warn('installMinigameAutoWatcher error', err); } catch {}
+  }
+}
+
+async function findMinigameHostDeep(selectors, maxWaitMs = 4000, root = document.documentElement) {
+  const DOCUMENT_NODE = 9;
+  const base = root && root.nodeType === DOCUMENT_NODE ? root.documentElement || root : root;
+  if (!base) return null;
   let found = null;
   const scan = () => {
-    forEachNodeDeep(document.documentElement, (el) => {
+    forEachNodeDeep(base, (el) => {
       if (found) return;
       for (const s of selectors) {
         try { if (el.matches?.(s)) { found = el; return; } } catch {}
@@ -703,7 +864,7 @@ async function findMinigameHostDeep(selectors, maxWaitMs = 1500) {
       scan();
       if (found) { mo.disconnect(); resolve(found); }
     });
-    mo.observe(document.documentElement, { childList: true, subtree: true });
+    mo.observe(base, { childList: true, subtree: true });
     setTimeout(() => { mo.disconnect(); resolve(found); }, maxWaitMs);
   });
 }
@@ -724,7 +885,20 @@ function extractOnSuccessFromElement(el) {
 async function pushOnSuccessFromElement(el, ticket) {
   try {
     const cb = extractOnSuccessFromElement(el);
-    if (typeof cb === 'function') { cb(ticket); return true; }
+    if (typeof cb === 'function') {
+      let handled = false;
+      try {
+        const res = cb(ticket);
+        if (res !== false) handled = true;
+      } catch {}
+      if (!handled) {
+        try {
+          cb({ goldenTicket: true, ticket });
+          handled = true;
+        } catch {}
+      }
+      return handled;
+    }
   } catch {}
   return false;
 }
@@ -761,9 +935,21 @@ async function pushGoldenTicketToReact(containerSelector = '.sc-623bb80d-0') {
 
   const onSuccess = fiber?.memoizedProps?.onSuccess;
   if (typeof onSuccess === 'function') {
-    onSuccess(ticket);
-    console.log('Golden Ticket pushed:', ticket);
-    return true;
+    let handled = false;
+    try {
+      const res = onSuccess(ticket);
+      if (res !== false) handled = true;
+    } catch {}
+    if (!handled) {
+      try {
+        onSuccess({ goldenTicket: true, ticket });
+        handled = true;
+      } catch {}
+    }
+    if (handled) {
+      console.log('Golden Ticket pushed:', ticket);
+      return true;
+    }
   }
   return false;
 }
@@ -801,10 +987,7 @@ async function handleMinigame() {
 
   if (site === 'popmartrock') {
     addLog('🎮 ตรวจสอบมินิเกม (popmartrock: React - fast path)...', '#87CEEB');
-    const selectors = [
-      '.sc-623bb80d-0','[data-minigame-root]','.react-captcha-root',
-      '[class*="captcha"]','[class*="minigame"]','[id*="captcha"]','[id*="minigame"]'
-    ];
+    const selectors = MINIGAME_HOST_SELECTORS;
 
     const ticket = makeGoldenTicket();
     try {
@@ -824,7 +1007,7 @@ async function handleMinigame() {
     const firedGlobal = await pushGoldenTicketGlobally(40);
     if (firedGlobal) { addLog('✅ Golden Ticket (global, limited) สำเร็จ!', '#90EE90'); return true; }
 
-    const host = await findMinigameHostDeep(selectors, 800);
+    const host = await findMinigameHostDeep(selectors, 4000);
     if (host) {
       addLog('🔍 พบ React Minigame host (deep)', '#87CEEB');
       if (await pushOnSuccessFromElement(host, ticket)) { addLog('✅ onSuccess (deep) ส่งสำเร็จ!', '#90EE90'); return true; }
@@ -1009,6 +1192,7 @@ async function clickNext(){
   if (!el || !isEnabled(el)) throw new Error('Next button not enabled - branch may not be selected properly');
   await clickFast(el);
   addLog('✅ Next แล้ว', '#90EE90');
+  installMinigameAutoWatcher(6000);
   await SHORT_DELAY();
 }
 
@@ -1032,16 +1216,100 @@ function findBranchElementByName(name) {
   }
   return null;
 }
+function autoClickConfirmInDatePicker() {
+  try {
+    if (window.__rbDatePickerConfirmTimeout) clearTimeout(window.__rbDatePickerConfirmTimeout);
+    if (window.__rbDatePickerConfirmTimer) clearInterval(window.__rbDatePickerConfirmTimer);
+  } catch {}
+  try {
+    addLog('⚙️ ยิง Confirm ใน DatePicker อัตโนมัติ', '#87CEEB');
+    const kickoff = setTimeout(() => {
+      const stopAt = Date.now() + 2000;
+      const tick = () => {
+        const buttons = Array.from(document.querySelectorAll('div.wholePage.datePicker button, div.datePicker button, button'));
+        for (const btn of buttons) {
+          const text = (btn.textContent || btn.innerText || '').trim().toLowerCase();
+          if (!text) continue;
+          if (text.includes('confirm') || text === 'ยืนยัน') {
+            if (btn.offsetParent !== null && !looksDisabled(btn)) {
+              try { btn.click(); } catch {}
+            }
+          }
+        }
+      };
+      tick();
+      const interval = setInterval(() => {
+        if (Date.now() > stopAt) {
+          clearInterval(interval);
+          window.__rbDatePickerConfirmTimer = null;
+          return;
+        }
+        tick();
+      }, 50);
+      window.__rbDatePickerConfirmTimer = interval;
+    }, 180);
+    window.__rbDatePickerConfirmTimeout = kickoff;
+  } catch {}
+}
+
+function autoClickConfirmInInfoPage(delayMs = 200) {
+  try {
+    if (window.__rbInfoConfirmTimeout) clearTimeout(window.__rbInfoConfirmTimeout);
+    if (window.__rbInfoConfirmTimer) clearInterval(window.__rbInfoConfirmTimer);
+  } catch {}
+  try {
+    addLog('⚙️ ยิง Confirm ใน InfoPage อัตโนมัติ', '#87CEEB');
+    const kickoff = setTimeout(() => {
+      const stopAt = Date.now() + 9000;
+      const tick = () => {
+        const buttons = Array.from(document.querySelectorAll('div.InfoPage button, button'));
+        for (const btn of buttons) {
+          const text = (btn.textContent || btn.innerText || '').trim().toLowerCase();
+          if (!text) continue;
+          if (text.includes('confirm') || text === 'ยืนยัน') {
+            if (btn.offsetParent !== null && !looksDisabled(btn)) {
+              try { btn.click(); } catch {}
+            }
+          }
+        }
+      };
+      tick();
+      const interval = setInterval(() => {
+        if (Date.now() > stopAt) {
+          clearInterval(interval);
+          window.__rbInfoConfirmTimer = null;
+          return;
+        }
+        tick();
+      }, 120);
+      window.__rbInfoConfirmTimer = interval;
+    }, Math.max(0, delayMs || 0));
+    window.__rbInfoConfirmTimeout = kickoff;
+  } catch {}
+}
+
 async function selectBranch(name){
   addLog(`🏢 เลือกสาขา: ${name}`);
   const currentSite = detectSite();
   const mode = document.getElementById('rb-mode')?.value || 'trial';
-  let branchWait = 1000;
-  if (mode === 'production') branchWait = 2000;
-  else if (currentSite === 'pm') branchWait = 600;
+  let branchWait = 120;
+  if (mode === 'production') branchWait = 180;
+  else if (currentSite === 'pm') branchWait = 80;
   await new Promise(r => setTimeout(r, branchWait));
 
-  let el = findBranchElementByName(name);
+  // Fast-path: prefer available branches like refsource
+  let el = null;
+  try {
+    const candidates = Array.from(document.querySelectorAll("div.branch-item:not([class*='full']):not([class*='disabled'])"));
+    if (candidates.length === 1) {
+      el = resolveClickable(candidates[0]);
+    } else if (candidates.length > 1) {
+      const target = norm(name);
+      const found = candidates.find(c => norm(c.textContent).includes(target));
+      el = resolveClickable(found || candidates[0]);
+    }
+  } catch {}
+  if (!el) el = findBranchElementByName(name);
   if (!el) {
     addLog(`⚠️ ไม่เจอสาขา ${name} รอสักครู่...`, '#FFB6C1');
     const t0 = performance.now();
@@ -1091,6 +1359,17 @@ async function selectBranch(name){
 async function selectDate(day){
   addLog(`📅 เลือกวันที่: ${day}`);
   const mode = document.getElementById('rb-mode')?.value || 'trial';
+  // Fast-path: choose available date by index similar to refsource
+  try {
+    const dates = Array.from(document.querySelectorAll("div[class*='MuiDayCalendar-week'] > button:not([class*=\"disabled\"])"));
+    if (dates.length) {
+      const idx = Math.max(0, Math.min(dates.length - 1, (parseInt(day, 10) || 1) - 1));
+      await clickFast(dates[idx]);
+      addLog(`🎯 เลือกวันที่: ${day} (fast idx=${idx+1})`, '#90EE90');
+      await SHORT_DELAY();
+      return;
+    }
+  } catch {}
   let el = null;
   let attempts = 0;
   const maxAttempts = 2000;
@@ -1111,22 +1390,97 @@ async function selectDate(day){
 
 async function selectTimeOrRound(timeOrRound){
   addLog(`⏰ เลือกเวลา: ${timeOrRound}`);
-  const mode = document.getElementById('rb-mode')?.value || 'trial';
-  let el = null;
-  let attempts = 0;
+  const target = String(timeOrRound ?? '').trim();
+  const numeric = Number(target);
+  const isNumericRound = target !== '' && !Number.isNaN(numeric);
+  const waitForExactAttempts = isNumericRound ? 0 : 10;
   const maxAttempts = 2000;
-  while (attempts < maxAttempts) {
-    if (mode === 'production') {
-      el = Array.from(document.querySelectorAll('button:not([class*="full"]):not([class*="disabled"]):not([disabled])'))
-        .find(b => b.textContent.trim() === String(timeOrRound) && b.offsetParent !== null);
-      if (el) { await clickFast(el); addLog(`🎯 เลือกเวลา: ${timeOrRound} แล้ว`, '#90EE90'); await SHORT_DELAY(); return; }
-    } else {
-      const xp = `//button[normalize-space()='${timeOrRound}']`;
-      el = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-      if (el && el.offsetParent !== null && !el.hasAttribute('disabled')) { el.click(); addLog(`🎯 เลือกเวลา: ${timeOrRound} แล้ว`, '#90EE90'); await SHORT_DELAY(); return; }
+  const pollDelay = 30;
+
+  const isAvailableButton = (btn) => {
+    if (!btn || btn.offsetParent === null) return false;
+    if (looksDisabled(btn)) return false;
+    return !/disabledTime/i.test(btn.className || '');
+  };
+
+  const trySelect = async (attemptNo) => {
+    const available = Array.from(document.querySelectorAll('div.times.paddingBottom > button')).filter(isAvailableButton);
+    if (available.length) {
+      if (isNumericRound) {
+        const idx = Math.max(0, Math.min(available.length - 1, Math.floor(numeric) - 1));
+        const choice = available[idx];
+        if (choice) {
+          await clickFast(choice);
+          addLog(`🎯 เลือกเวลาตามรอบ: ${target} → idx=${idx + 1}`, '#90EE90');
+          autoClickConfirmInDatePicker();
+          await SHORT_DELAY();
+          return true;
+        }
+      }
+
+      const exact = available.find(btn => (btn.textContent || btn.innerText || '').trim() === target);
+      if (exact) {
+        await clickFast(exact);
+        addLog(`🎯 เลือกเวลา: ${target} (exact)`, '#90EE90');
+        autoClickConfirmInDatePicker();
+        await SHORT_DELAY();
+        return true;
+      }
+
+      if (!isNumericRound && attemptNo < waitForExactAttempts) {
+        return false;
+      }
+
+      const fallback = available[0];
+      if (fallback) {
+        await clickFast(fallback);
+        addLog('🎯 เลือกเวลา: ตัวแรกที่ว่าง', '#90EE90');
+        autoClickConfirmInDatePicker();
+        await SHORT_DELAY();
+        return true;
+      }
     }
-    attempts++; await new Promise(resolve => setTimeout(resolve, 30));
+
+    const mode = document.getElementById('rb-mode')?.value || 'trial';
+    if (mode === 'production') {
+      const direct = Array.from(document.querySelectorAll('button:not([class*\"full\"]):not([class*\"disabled\"]):not([disabled])'))
+        .find(b => (b.textContent || '').trim() === target && b.offsetParent !== null);
+      if (direct) {
+        await clickFast(direct);
+        addLog(`🎯 เลือกเวลา: ${target} แล้ว`, '#90EE90');
+        autoClickConfirmInDatePicker();
+        await SHORT_DELAY();
+        return true;
+      }
+    } else {
+      const xp = `//button[normalize-space()='${target}']`;
+      const el = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+      if (el && el.offsetParent !== null && !el.hasAttribute('disabled')) {
+        el.click();
+        addLog(`🎯 เลือกเวลา: ${target} แล้ว`, '#90EE90');
+        autoClickConfirmInDatePicker();
+        await SHORT_DELAY();
+        return true;
+      }
+    }
+    return false;
+  };
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const done = await trySelect(attempt);
+    if (done) return;
+    await new Promise(resolve => setTimeout(resolve, pollDelay));
   }
+
+  const fallback = Array.from(document.querySelectorAll('div.times.paddingBottom > button')).find(isAvailableButton);
+  if (fallback) {
+    await clickFast(fallback);
+    addLog('🎯 เลือกเวลาแบบ fallback ตัวแรกที่ว่าง', '#90EE90');
+    autoClickConfirmInDatePicker();
+    await SHORT_DELAY();
+    return;
+  }
+
   throw new Error(`ไม่พบเวลา: ${timeOrRound}`);
 }
 
@@ -1146,6 +1500,7 @@ async function confirmDateTime(){
   const el = await waitForElementDynamic(xp);
   await clickFast(el);
   addLog('🎯 ยืนยันวันเวลาแล้ว', '#90EE90');
+  autoClickConfirmInInfoPage(200);
   await SHORT_DELAY();
 }
 
@@ -1567,3 +1922,4 @@ setTimeout(function() {
   document.getElementById('rb-day')?.addEventListener('change', saveLastSelection);
   document.getElementById('rb-time')?.addEventListener('change', saveLastSelection);
 }, 100);
+
